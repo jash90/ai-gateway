@@ -1,13 +1,53 @@
 import { z } from 'zod';
 
+/**
+ * Process-env schema. Validated once at startup in `main.ts` — the app refuses
+ * to boot if any required field is missing or malformed. Per CLAUDE.md, secret
+ * env vars must be enforced at startup, not lazily at first use.
+ */
 export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+
+  // ---------------------------------------------------------------------------
+  // Auth
+  // ---------------------------------------------------------------------------
   JWT_SECRET: z.string().min(32),
   ADMIN_API_KEY: z.string().min(1),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  OPENAI_API_KEY: z.string().optional(),
+
+  // ---------------------------------------------------------------------------
+  // BYOK envelope encryption (D-004 / D-010)
+  // The master key is base64-encoded and MUST decode to exactly 32 bytes for
+  // AES-256-GCM. Generate with: `openssl rand -base64 32`.
+  // ---------------------------------------------------------------------------
+  MASTER_ENCRYPTION_KEY: z
+    .string()
+    .min(1)
+    .refine(
+      (s) => {
+        try {
+          return Buffer.from(s, 'base64').length === 32;
+        } catch {
+          return false;
+        }
+      },
+      {
+        message:
+          'MASTER_ENCRYPTION_KEY must decode to exactly 32 bytes — generate with `openssl rand -base64 32`',
+      },
+    ),
+  MASTER_KEY_ID: z.string().min(1).default('v1'),
+
+  // ---------------------------------------------------------------------------
+  // App URLs (used for verify/reset-password email links)
+  // ---------------------------------------------------------------------------
+  APP_URL: z.string().url().default('http://localhost:5173'),
+
+  // ---------------------------------------------------------------------------
+  // Optional integrations
+  // ---------------------------------------------------------------------------
   RESEND_API_KEY: z.string().optional(),
+
   PORT: z.coerce.number().default(3000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });
