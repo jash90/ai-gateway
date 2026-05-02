@@ -40,10 +40,25 @@ async function bootstrap() {
   // No global prefix — controllers already include 'v1' in their routes
   // health controller is excluded from auth by @Public() decorator
 
-  // CORS
-  app.enableCors({
-    origin: env.NODE_ENV === 'production' ? false : true,
-  })
+  // CORS — production: explicit whitelist via CORS_ORIGINS (refuse to start
+  // serving CORS at all if no origins are configured, since `origin: false`
+  // blocks legitimate dashboards on a different subdomain). Dev: open.
+  if (env.NODE_ENV === 'production') {
+    if (env.CORS_ORIGINS.length === 0) {
+      // Soft-warn rather than throw — control plane is fine same-origin.
+      // Operators that need cross-origin must set CORS_ORIGINS.
+      console.warn(
+        '[boot] CORS_ORIGINS is empty in production — cross-origin browser ' +
+          'requests will be rejected. Set CORS_ORIGINS=https://app.example.com,...',
+      )
+    }
+    app.enableCors({
+      origin: env.CORS_ORIGINS.length > 0 ? env.CORS_ORIGINS : false,
+      credentials: true,
+    })
+  } else {
+    app.enableCors({ origin: true, credentials: true })
+  }
 
   // Global validation: ZodValidationPipe is wired via APP_PIPE in app.module.ts.
   // We deliberately DO NOT use the legacy class-validator ValidationPipe — it would

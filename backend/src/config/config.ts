@@ -44,6 +44,23 @@ export const envSchema = z.object({
   APP_URL: z.string().url().default('http://localhost:5173'),
 
   // ---------------------------------------------------------------------------
+  // CORS — comma-separated whitelist for production. Empty / unset in dev
+  // means the dev fallback (`origin: true`) accepts any origin so
+  // `vite dev` on a different port doesn't get blocked.
+  // ---------------------------------------------------------------------------
+  CORS_ORIGINS: z
+    .string()
+    .optional()
+    .transform((s) =>
+      s
+        ? s
+            .split(',')
+            .map((o) => o.trim())
+            .filter(Boolean)
+        : [],
+    ),
+
+  // ---------------------------------------------------------------------------
   // Optional integrations
   // ---------------------------------------------------------------------------
   RESEND_API_KEY: z.string().optional(),
