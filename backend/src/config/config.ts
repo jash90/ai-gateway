@@ -61,6 +61,21 @@ export const envSchema = z.object({
     ),
 
   // ---------------------------------------------------------------------------
+  // trustProxy — when true, Fastify honors X-Forwarded-For so request.ip
+  // reflects the real client (not the LB / reverse proxy). Required behind
+  // any production load balancer (Railway/Fly/Render/Vercel/k8s ingress).
+  // Otherwise @nestjs/throttler keys ALL traffic by the LB's IP and the
+  // per-IP rate limits become "60 req/min PER LOAD BALANCER".
+  //
+  // Leave OFF in dev so XFF spoofing isn't possible against a local server.
+  // ---------------------------------------------------------------------------
+  TRUST_PROXY: z
+    .enum(['true', 'false', '0', '1'])
+    .optional()
+    .default('false')
+    .transform((s) => s === 'true' || s === '1'),
+
+  // ---------------------------------------------------------------------------
   // Optional integrations
   // ---------------------------------------------------------------------------
   RESEND_API_KEY: z.string().optional(),

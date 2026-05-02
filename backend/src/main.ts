@@ -14,6 +14,10 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       bodyLimit: 1024 * 1024, // 1 MB request body cap
+      // When deployed behind a reverse proxy / load balancer, this lets
+      // Fastify resolve `request.ip` from X-Forwarded-For so the throttler
+      // and IP-attributed audit logs see the real client. See env config.
+      trustProxy: env.TRUST_PROXY,
     }),
   )
 
