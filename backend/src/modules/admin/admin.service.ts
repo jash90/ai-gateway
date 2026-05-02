@@ -32,7 +32,10 @@ export class AdminService {
         : {}),
     }
 
-    const accounts = await this.prisma.account.findMany({
+    // Always use accountRaw so the explicit `deletedAt` clause above is the
+    // only filter. The auto-filter on `this.account` would otherwise hide
+    // deleted rows even when admins set `includeDeleted: true`.
+    const accounts = await this.prisma.accountRaw.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       include: {

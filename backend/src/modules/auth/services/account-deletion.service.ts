@@ -38,7 +38,9 @@ export class AccountDeletionService {
   // ---------------------------------------------------------------------------
 
   async softDelete(accountId: string, ctx: RequestContext): Promise<void> {
-    const account = await this.prisma.account.findUnique({ where: { id: accountId } })
+    // accountRaw bypasses the soft-delete filter so we can find an already-
+    // soft-deleted row (re-deletion is a no-op; hard-delete needs the row).
+    const account = await this.prisma.accountRaw.findUnique({ where: { id: accountId } })
     if (!account || account.deletedAt) {
       // Idempotent: already deleted = no-op.
       return
@@ -91,7 +93,9 @@ export class AccountDeletionService {
   // ---------------------------------------------------------------------------
 
   async hardDelete(accountId: string, ctx: RequestContext): Promise<void> {
-    const account = await this.prisma.account.findUnique({ where: { id: accountId } })
+    // accountRaw bypasses the soft-delete filter so we can find an already-
+    // soft-deleted row (re-deletion is a no-op; hard-delete needs the row).
+    const account = await this.prisma.accountRaw.findUnique({ where: { id: accountId } })
     if (!account) return
 
     const now = new Date()

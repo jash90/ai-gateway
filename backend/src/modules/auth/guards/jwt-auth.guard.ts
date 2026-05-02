@@ -67,7 +67,9 @@ export class JwtAuthGuard implements CanActivate {
       })
     }
 
-    const account = await this.prisma.account.findUnique({
+    // accountRaw: we want to see deleted rows so we can return the specific
+    // ACCOUNT_DELETED error (better UX than the generic INVALID_TOKEN).
+    const account = await this.prisma.accountRaw.findUnique({
       where: { id: payload.sub },
     })
 

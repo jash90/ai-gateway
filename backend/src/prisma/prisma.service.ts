@@ -31,8 +31,26 @@ function injectAccountSoftDeleteFilter(args: Prisma.AccountFindManyArgs): void {
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
+  /**
+   * Raw Account delegate — bypasses the soft-delete filter applied to
+   * `this.account`. Use ONLY when you must operate on or see deleted rows:
+   *   - AccountDeletionService.hardDelete (cooling-off worker → GDPR erasure)
+   *   - JwtAuthGuard / AdminGuard (so deleted accounts get a specific error)
+   *   - AdminService.listAccounts({ includeDeleted: true })
+   *
+   * Every other consumer should keep using `this.account` (auto-filtered).
+   * Set in onModuleInit BEFORE the `account` getter is overridden.
+   */
+  accountRaw!: PrismaClient['account'];
+
   async onModuleInit() {
     await this.$connect();
+
+    // Capture the raw delegate BEFORE applying the extension. The right-hand
+    // side hits the original PrismaClient getter; assigning to a regular
+    // instance property stores a stable reference that subsequent calls to
+    // `this.accountRaw` will read directly.
+    this.accountRaw = this.account;
 
     // Apply the soft-delete extension to Account reads. The extension returns a
     // NEW Proxy over `this`, so we replace the `account` delegate in-place to
