@@ -51,7 +51,7 @@ export class ResetPasswordDto extends createZodDto(resetPasswordSchema) {}
 
 export const accountSummarySchema = z.object({
   id: z.string().uuid(),
-  email: z.string().email(),
+  email: emailSchema,
   name: z.string().nullable(),
   role: z.enum(['USER', 'ADMIN']),
   emailVerified: z.boolean(),
@@ -79,7 +79,7 @@ export class VerifyEmailResponseDto extends createZodDto(verifyEmailResponseSche
 
 export const meResponseSchema = z.object({
   id: z.string().uuid(),
-  email: z.string().email(),
+  email: emailSchema,
   name: z.string().nullable(),
   role: z.enum(['USER', 'ADMIN']),
   emailVerified: z.boolean(),
