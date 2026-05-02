@@ -1,8 +1,11 @@
 import { defineConfig } from 'orval'
 
+const apiUrl =
+  process.env.RACCOON_API_URL?.replace(/\/$/, '') ?? 'http://localhost:3000'
+
 export default defineConfig({
   dashboard: {
-    input: 'http://localhost:3000/docs-json',
+    input: `${apiUrl}/docs-json`,
     output: {
       target: './src/gen/api.ts',
       client: 'react-query',
