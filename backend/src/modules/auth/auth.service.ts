@@ -103,22 +103,24 @@ export class AuthService {
       row.usedAt ||
       row.expiresAt < new Date()
     ) {
-      throw new BadRequestException({
-        errorCode: 'INVALID_OR_EXPIRED_TOKEN',
-        message: 'Verification token is invalid or has expired.',
-      })
+      throw invalidOrExpiredToken()
     }
 
-    await this.prisma.$transaction([
-      this.prisma.account.update({
+    // Atomic compare-and-set: claim the token by transitioning usedAt: null → now.
+    // If a concurrent request already consumed it, count === 0 and we reject.
+    await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.emailToken.updateMany({
+        where: { id: row.id, usedAt: null },
+        data: { usedAt: new Date() },
+      })
+      if (claimed.count === 0) {
+        throw invalidOrExpiredToken()
+      }
+      await tx.account.update({
         where: { id: row.accountId },
         data: { emailVerified: true },
-      }),
-      this.prisma.emailToken.update({
-        where: { id: row.id },
-        data: { usedAt: new Date() },
-      }),
-    ])
+      })
+    })
 
     await this.audit.log({
       accountId: row.accountId,
@@ -275,23 +277,23 @@ export class AuthService {
       row.usedAt ||
       row.expiresAt < new Date()
     ) {
-      throw new BadRequestException({
-        errorCode: 'INVALID_OR_EXPIRED_TOKEN',
-        message: 'Reset token is invalid or has expired.',
-      })
+      throw invalidOrExpiredToken()
     }
 
     const newHash = await this.passwordService.hash(dto.newPassword)
-    await this.prisma.$transaction([
-      this.prisma.account.update({
+    await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.emailToken.updateMany({
+        where: { id: row.id, usedAt: null },
+        data: { usedAt: new Date() },
+      })
+      if (claimed.count === 0) {
+        throw invalidOrExpiredToken()
+      }
+      await tx.account.update({
         where: { id: row.accountId },
         data: { passwordHash: newHash },
-      }),
-      this.prisma.emailToken.update({
-        where: { id: row.id },
-        data: { usedAt: new Date() },
-      }),
-    ])
+      })
+    })
 
     // Force-logout all other sessions for security.
     await this.refreshTokenService.revokeAllForAccount(row.accountId)
@@ -401,6 +403,13 @@ function genericInvalidCredentials(): UnauthorizedException {
   return new UnauthorizedException({
     errorCode: 'INVALID_CREDENTIALS',
     message: 'Invalid email or password.',
+  })
+}
+
+function invalidOrExpiredToken(): BadRequestException {
+  return new BadRequestException({
+    errorCode: 'INVALID_OR_EXPIRED_TOKEN',
+    message: 'Token is invalid or has expired.',
   })
 }
 
