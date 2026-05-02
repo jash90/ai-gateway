@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { Activity, RefreshCcw, Pause, Play, Filter } from 'lucide-react'
+import { toast } from 'sonner'
+import { Activity, RefreshCcw, Pause, Play, Filter, AlertTriangle } from 'lucide-react'
 import { Card, CardContent } from '@shared/ui/Card'
 import { Button } from '@shared/ui/Button'
 import { Skeleton } from '@shared/ui/Skeleton'
@@ -91,6 +92,23 @@ export const EventsList = React.memo(function EventsList() {
     [query.data],
   )
 
+  // Surface query errors so a dead live-stream is obvious. Toast once per
+  // failure transition (don't spam on every retry tick).
+  const lastErrorRef = React.useRef<unknown>(null)
+  React.useEffect(() => {
+    if (query.error && query.error !== lastErrorRef.current) {
+      lastErrorRef.current = query.error
+      const msg =
+        query.error instanceof Error
+          ? query.error.message
+          : 'Nie udało się pobrać zdarzeń. Spróbuj odświeżyć.'
+      toast.error(msg)
+    }
+    if (!query.error) {
+      lastErrorRef.current = null
+    }
+  }, [query.error])
+
   return (
     <>
       <div className="space-y-4">
@@ -152,11 +170,18 @@ export const EventsList = React.memo(function EventsList() {
             onChange={(e) => setModel(e.target.value)}
             className="h-9 max-w-xs"
           />
-          {autoRefresh && documentVisible && selectedEvent === null && (
-            <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
-              <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-600" />
-              Live (co 5s)
+          {query.error ? (
+            <Badge variant="secondary" className="bg-red-50 text-red-700">
+              <AlertTriangle className="mr-1 h-3 w-3" />
+              Błąd pobierania
             </Badge>
+          ) : (
+            autoRefresh && documentVisible && selectedEvent === null && (
+              <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
+                <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-600" />
+                Live (co 5s)
+              </Badge>
+            )
           )}
         </div>
 
