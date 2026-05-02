@@ -52,10 +52,8 @@ export const WebhookSecretReveal = React.memo(function WebhookSecretReveal({
     <Dialog open={open} onOpenChange={() => undefined}>
       <DialogContent
         hideClose
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onInteractOutside={(e: any) => e.preventDefault()}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onEscapeKeyDown={(e: any) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
