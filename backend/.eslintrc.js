@@ -2,7 +2,7 @@ module.exports = {
   parser: '@typescript-eslint/parser',
   parserOptions: {
     project: 'tsconfig.json',
-    tsconfigRootDir : __dirname,
+    tsconfigRootDir : __dirname, 
     sourceType: 'module',
   },
   plugins: ['@typescript-eslint/eslint-plugin'],
@@ -21,5 +21,9 @@ module.exports = {
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'off',
+    // Surface unhandled async work — common cause of "I clicked the button,
+    // nothing happened, no error in logs". `void expr;` is the documented
+    // intentional-fire-and-forget escape hatch.
+    '@typescript-eslint/no-floating-promises': 'error',
   },
 };
