@@ -25,6 +25,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       body.message = exception.message;
     }
 
-    response.status(status).send(body);
+    // FastifyReply is thenable; the actual write is non-blocking and we don't
+    // need to await before returning from the catch handler.
+    void response.status(status).send(body);
   }
 }

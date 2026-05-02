@@ -173,7 +173,7 @@ export class GatewayController {
 
     // Error from upstream — surface upstream's status + body shape.
     if (response.statusCode >= 400) {
-      args.reply.status(response.statusCode)
+      void args.reply.status(response.statusCode)
       return response.body ?? { errorCode: response.errorCode, statusCode: response.statusCode }
     }
 
@@ -208,11 +208,11 @@ export class GatewayController {
           void streamFinalize().catch(() => undefined)
         }
       }
-      args.reply.hijack()
+      void args.reply.hijack()
       return undefined
     }
 
-    args.reply.status(response.statusCode)
+    void args.reply.status(response.statusCode)
     return response.body
   }
 }
