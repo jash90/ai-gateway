@@ -16,6 +16,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import { ZodResponse } from 'nestjs-zod'
 import type { FastifyRequest } from 'fastify'
 import type { Account } from '@prisma/client'
@@ -51,6 +52,8 @@ export class AuthController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  // Anti-mailbomb: cap account creation per IP. Legitimate flow is one or two.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ZodResponse({ status: 201, description: 'Account created. Email verification required before login.', type: RegisterResponseDto })
   @ApiOperation({ summary: 'Register a new Account', description: 'Creates an inactive Account and emails a verification link.' })
   @ApiResponse({ status: 409, description: 'Email already registered.' })
@@ -60,6 +63,8 @@ export class AuthController {
 
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
+  // Anti-bruteforce on token guess: 10/min/IP is plenty for a real user.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ZodResponse({ status: 200, description: 'Email verified.', type: VerifyEmailResponseDto })
   @ApiOperation({ summary: 'Verify email via token from email link' })
   @ApiResponse({ status: 400, description: 'Token invalid or expired.' })
@@ -73,6 +78,9 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  // Anti-bruteforce on passwords: 10/min/IP. Tighter than registration — a real
+  // user rarely needs more than a couple of attempts.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ZodResponse({ status: 200, description: 'Login successful.', type: LoginResponseDto })
   @ApiOperation({ summary: 'Log in with email + password', description: 'Returns access (15 min) and refresh (30 d) tokens.' })
   @ApiResponse({ status: 401, description: 'Invalid credentials or unverified email.' })
@@ -82,6 +90,9 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  // Refresh is called frequently by the dashboard (every ~14m) — but per-IP
+  // 30/min still leaves headroom for legitimate multi-tab sessions.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ZodResponse({ status: 200, description: 'New token pair.', type: LoginResponseDto })
   @ApiOperation({ summary: 'Rotate refresh token + issue new access token' })
   @ApiResponse({ status: 401, description: 'Refresh token invalid, expired, or reused.' })
@@ -109,6 +120,9 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  // Anti-mailbomb: 3/min/IP keeps spam off Resend without breaking a real user
+  // who triggers the flow twice across browser tabs.
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @ApiOperation({ summary: 'Request a password reset email', description: 'Always returns 200 (anti-enumeration).' })
   @ApiResponse({ status: 200, description: 'If the email is registered, a reset link was sent.' })
   async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: FastifyRequest) {
@@ -118,6 +132,8 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  // Anti-bruteforce on token guess.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Set a new password using a reset token' })
   @ApiResponse({ status: 200, description: 'Password changed.' })
   @ApiResponse({ status: 400, description: 'Token invalid or expired.' })

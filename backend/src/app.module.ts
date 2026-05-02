@@ -1,8 +1,9 @@
 import { Module, Global } from '@nestjs/common'
-import { APP_PIPE } from '@nestjs/core'
+import { APP_GUARD, APP_PIPE } from '@nestjs/core'
 import Redis from 'ioredis'
 import { ConfigModule } from '@nestjs/config'
 import { BullModule } from '@nestjs/bullmq'
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler'
 import { ZodValidationPipe } from './common/pipes/zod.pipe'
 import { AuthModule } from './modules/auth/auth.module'
 import { HealthModule } from './modules/health/health.module'
@@ -49,6 +50,15 @@ function parseRedisUrl(url: string) {
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Global throttling baseline. Per-route overrides via @Throttle({...}).
+    // Trusts X-Forwarded-For only inside getTracker (Fastify already merges).
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60_000, // 1 minute
+        limit: 60, // 60 req/min/IP
+      },
+    ]),
     BullModule.forRoot({
       connection: parseRedisUrl(process.env.REDIS_URL ?? 'redis://localhost:6379'),
     }),
@@ -72,6 +82,9 @@ function parseRedisUrl(url: string) {
     // Global Zod validation — every controller method with a DTO that extends
     // `createZodDto(...)` gets validated automatically. See ./common/pipes/zod.pipe.ts.
     { provide: APP_PIPE, useClass: ZodValidationPipe },
+    // Global rate-limiting. Baseline 60 req/min/IP; sensitive routes override
+    // with @Throttle({...}) decorators (see auth.controller.ts).
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     {
       provide: 'REDIS',
       useFactory: () => {
