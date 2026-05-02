@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { InjectQueue } from '@nestjs/bullmq'
 import type { Queue } from 'bullmq'
 import { Prisma } from '@prisma/client'
@@ -43,6 +43,8 @@ interface DispatchInput {
  */
 @Injectable()
 export class WebhooksService {
+  private readonly logger = new Logger(WebhooksService.name)
+
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
@@ -307,8 +309,17 @@ export class WebhooksService {
             removeOnFail: { age: 7 * 24 * 60 * 60 },
           },
         )
-      } catch {
-        // queue failure is non-fatal — webhooks are best-effort.
+      } catch (err) {
+        // Queue failure (Redis down, etc.) is non-fatal — webhooks are
+        // best-effort — but operators need to see the failure or a degraded
+        // BullMQ ends up looking like "events stopped firing" without a
+        // single log line to grep for.
+        this.logger.warn(
+          `Failed to enqueue webhook delivery accountId=${input.accountId} ` +
+            `webhookId=${wh.id} event=${input.event}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+        )
       }
     }
   }
