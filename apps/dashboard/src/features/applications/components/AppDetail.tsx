@@ -1,14 +1,13 @@
 import * as React from 'react'
-import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { ChevronLeft, Pencil, Trash2 } from 'lucide-react'
-import { cn } from '@shared/utils/cn'
 import { Button } from '@shared/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@shared/ui/Card'
 import { Skeleton } from '@shared/ui/Skeleton'
 import { Badge } from '@shared/ui/Badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@shared/ui/Tabs'
 import { ComingInSprintCard } from '@shared/components/ComingInSprintCard'
 import { AnalyticsDashboard } from '@features/analytics'
 import { useConfirm } from '@shared/ui/ConfirmDialog'
@@ -136,22 +135,22 @@ export const AppDetail = React.memo(function AppDetail({ applicationId }: AppDet
         </div>
       </div>
 
-      <TabsPrimitive.Root defaultValue="keys" className="space-y-6">
-        <TabsPrimitive.List className="inline-flex h-10 items-center justify-start rounded-md bg-neutral-100 p-1 text-neutral-500">
+      <Tabs defaultValue="keys" className="space-y-6">
+        <TabsList>
           <TabsTrigger value="keys">Klucze</TabsTrigger>
           <TabsTrigger value="analytics">Analityka</TabsTrigger>
           <TabsTrigger value="settings">Ustawienia</TabsTrigger>
-        </TabsPrimitive.List>
+        </TabsList>
 
-        <TabsPrimitive.Content value="keys">
+        <TabsContent value="keys">
           <KeyList applicationId={applicationId} />
-        </TabsPrimitive.Content>
+        </TabsContent>
 
-        <TabsPrimitive.Content value="analytics">
+        <TabsContent value="analytics">
           <AnalyticsDashboard applicationId={applicationId} />
-        </TabsPrimitive.Content>
+        </TabsContent>
 
-        <TabsPrimitive.Content value="settings">
+        <TabsContent value="settings">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Ogólne</CardTitle>
@@ -200,37 +199,11 @@ export const AppDetail = React.memo(function AppDetail({ applicationId }: AppDet
               </div>
             </CardContent>
           </Card>
-        </TabsPrimitive.Content>
-      </TabsPrimitive.Root>
+        </TabsContent>
+      </Tabs>
 
       <AppForm open={editing} onOpenChange={setEditing} app={app} />
     </div>
   )
 })
 AppDetail.displayName = 'AppDetail'
-
-// =============================================================================
-// Inline Tab trigger (matches our shadcn primitives)
-// =============================================================================
-
-const TabsTrigger = React.memo(function TabsTrigger({
-  value,
-  children,
-}: {
-  value: string
-  children: React.ReactNode
-}) {
-  return (
-    <TabsPrimitive.Trigger
-      value={value}
-      className={cn(
-        'inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-white transition-all',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400',
-        'data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm',
-      )}
-    >
-      {children}
-    </TabsPrimitive.Trigger>
-  )
-})
-TabsTrigger.displayName = 'TabsTrigger'
