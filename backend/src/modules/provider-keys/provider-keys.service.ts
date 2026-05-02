@@ -184,6 +184,7 @@ export class ProviderKeysService {
           provider: row.provider,
           errorCode: result.errorCode,
           upstreamStatus: result.upstreamStatus,
+          message: result.message,
         },
         ipAddress: ctx.ip,
         userAgent: ctx.userAgent,
@@ -239,10 +240,17 @@ export class ProviderKeysService {
         .slice(0, 10)
       return { ok: true, sampleModels, upstreamStatus: response.status }
     } catch (err) {
+      const aborted = err instanceof Error && err.name === 'AbortError'
+      const rawMessage = err instanceof Error ? err.message : String(err)
+      const message = rawMessage.slice(0, 200)
       this.logger.warn(
-        `Provider test failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Provider test failed: url=${url} reason=${aborted ? 'TIMEOUT' : 'NETWORK'} message=${rawMessage}`,
       )
-      return { ok: false, errorCode: 'NETWORK_ERROR' }
+      return {
+        ok: false,
+        errorCode: aborted ? 'TIMEOUT' : 'NETWORK_ERROR',
+        message,
+      }
     } finally {
       clearTimeout(timer)
     }

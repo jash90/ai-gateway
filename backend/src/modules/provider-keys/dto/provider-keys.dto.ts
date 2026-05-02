@@ -51,9 +51,15 @@ export const providerKeyTestResultSchema = z.object({
   ok: z.boolean(),
   sampleModels: z.array(z.string()).optional(),
   errorCode: z
-    .enum(['INVALID_KEY', 'RATE_LIMITED', 'NETWORK_ERROR', 'UNKNOWN'])
+    .enum(['INVALID_KEY', 'RATE_LIMITED', 'NETWORK_ERROR', 'TIMEOUT', 'UNKNOWN'])
     .optional(),
   upstreamStatus: z.number().int().optional(),
+  /**
+   * Sanitized error message (first 200 chars of `err.message` from Node fetch).
+   * Safe to surface — never contains key material, request bodies, or auth
+   * headers. Helps customers debug ECONNREFUSED / DNS / TLS / timeout issues.
+   */
+  message: z.string().max(200).optional(),
 })
 export class ProviderKeyTestResultDto extends createZodDto(providerKeyTestResultSchema) {}
 
