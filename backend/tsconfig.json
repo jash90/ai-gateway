@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2022",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    // BE-S1-002: legacy modules disabled during hard cutover. They will be
+    // resurrected (refactored to new schema) in their respective sprints.
+    // Keep these excluded so the rest of the backend compiles.
+    "src/modules/jobs",
+    "src/modules/proxy",
+    "src/modules/usage",
+    "src/common/guards/api-key.guard.ts"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@raccoon/sdk",
+  "version": "0.1.0",
+  "description": "Native TypeScript client for Raccoon AI Gateway — BYOK proxy for OpenAI / Anthropic / OpenRouter",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "gateway",
+    "openai",
+    "anthropic",
+    "openrouter",
+    "byok",
+    "raccoon"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

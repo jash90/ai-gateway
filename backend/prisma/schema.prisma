@@ -1,0 +1,560 @@
+// =============================================================================
+// AI GATEWAY — ACTIVE SCHEMA (post hard cutover)
+// =============================================================================
+//
+// This file replaced the legacy schema (Customer / CreditWallet / Entitlement)
+// as part of BE-S1-001. The legacy version is preserved at
+// `schema.legacy.prisma.bak.original` for reference — do not import from it.
+//
+// To re-apply this cutover from scratch (e.g. on a fresh dev machine):
+//
+//   1. Stop the API.
+//   2. `dropdb $DB_NAME && createdb $DB_NAME` (or terminate + DROP/CREATE in psql).
+//   3. `rm -rf prisma/migrations/`
+//   4. `pnpm prisma migrate dev --name init_byok`
+//   5. `pnpm prisma db seed` (admin account + ModelPricing rows).
+//   6. Apply raw SQL extras (BRIN indexes, see bottom of this file).
+//
+// DROPPED MODELS (compared to legacy schema):
+//   - Customer            → renamed to Account, password-based auth
+//   - User                → renamed to EndUser, scoped to Application
+//   - CreditWallet        → DROPPED (no credits in MVP)
+//   - CreditTransaction   → DROPPED
+//   - Entitlement         → DROPPED (no feature gating in MVP)
+//   - TransactionType     → DROPPED
+//   - ProviderCost        → renamed to ModelPricing (info-only, drives costUsd)
+//
+// NEW MODELS:
+//   - RefreshToken        — short-lived access (15 min) + rotated refresh (30 d)
+//   - Application         — multi-app per Account
+//   - ApplicationKey      — sk-rcn-live-... data plane keys (argon2id hashed)
+//   - UserProviderKey     — BYOK keys (AES-256-GCM envelope encryption)
+//
+// CHANGED MODELS:
+//   - UsageEvent          — adds applicationId/applicationKeyId/endUserId,
+//                           ttftMs, latencyMs, finishReason, isStream,
+//                           statusCode, errorCode, requestId; drops creditsBurned,
+//                           featureId, eventType
+//   - WebhookConfig       — accountId instead of customerId
+//   - AlertRule           — accountId instead of customerId, typed enum,
+//                           drops BALANCE_LOW, adds ERROR_RATE_HIGH/LATENCY_P95_HIGH
+//   - AuditLog            — accountId instead of customerId; FULL audit mode
+//                           (BYOK decryption logged per request — hot path)
+//
+// CROSS-CUTTING DECISIONS (see /PLAN.md §Decyzje zatwierdzone):
+//
+//   * Email normalization: app-layer (Zod `.trim().toLowerCase()`), not citext.
+//     The DB column stays plain `text @unique`. Source of truth for the rule:
+//     `shared/validation/email.schema.ts` — used by every DTO touching email.
+//
+//   * Soft delete on Account: `deletedAt DateTime?`. All Account→child relations
+//     are `onDelete: Restrict` to make it impossible to accidentally wipe usage
+//     history via `prisma.account.delete()`. Exception: RefreshToken cascades
+//     (ephemeral, no audit value). Hard delete is reserved for the GDPR erase
+//     endpoint added in Phase 4 (anonymize PII, keep aggregates).
+//
+//   * Full audit on BYOK: every encryption/decryption event lands in audit_logs.
+//     This is hot-path and grows at ~request rate. See retention notes at the
+//     bottom of this file (90-day rolling window for hot-path actions, 2-year
+//     for security-sensitive ones, monthly partitioning if it outgrows that).
+//
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum AccountRole {
+  USER
+  ADMIN
+
+  @@map("account_role")
+}
+
+enum ProviderType {
+  OPENAI
+  ANTHROPIC
+  OPENROUTER
+
+  @@map("provider_type")
+}
+
+enum AlertRuleType {
+  USAGE_THRESHOLD // total cost / tokens above threshold in period
+  DAILY_LIMIT // hard cap per day
+  ERROR_RATE_HIGH // 4xx/5xx ratio above threshold
+  LATENCY_P95_HIGH // p95 latency above threshold
+
+  @@map("alert_rule_type")
+}
+
+enum AlertChannel {
+  EMAIL
+  WEBHOOK
+  BOTH
+
+  @@map("alert_channel")
+}
+
+enum AuditActorType {
+  ACCOUNT
+  ADMIN
+  SYSTEM
+
+  @@map("audit_actor_type")
+}
+
+enum EmailTokenPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+
+  @@map("email_token_purpose")
+}
+
+// =============================================================================
+// Identity: Account + Refresh tokens
+// =============================================================================
+
+model Account {
+  id            String      @id @default(uuid())
+  // Always lowercased + trimmed at the DTO boundary (Zod transform). Never
+  // written or queried with mixed case from the application layer.
+  email         String      @unique
+  passwordHash  String      @map("password_hash") // argon2id
+  emailVerified Boolean     @default(false) @map("email_verified")
+  name          String?
+  role          AccountRole @default(USER)
+  isActive      Boolean     @default(true) @map("is_active")
+  // Soft delete marker. When set:
+  //   - JwtAuthGuard rejects the JWT (treats account as logged out)
+  //   - Login is rejected with a generic "invalid credentials" error
+  //   - The soft-delete service renames email to `deleted+<id>@deleted.local`
+  //     so the original address can be reused for a fresh registration
+  //   - All ApplicationKeys are auto-revoked (revokedAt = now)
+  // Hard delete (anonymization) happens via the Phase 4 GDPR endpoint.
+  deletedAt     DateTime?   @map("deleted_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  refreshTokens  RefreshToken[]
+  emailTokens    EmailToken[]
+  applications   Application[]
+  providerKeys   UserProviderKey[]
+  usageEvents    UsageEvent[]
+  webhookConfigs WebhookConfig[]
+  alertRules     AlertRule[]
+
+  @@index([deletedAt])
+  @@map("accounts")
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid())
+  accountId    String    @map("account_id")
+  tokenHash    String    @unique @map("token_hash") // sha256 of opaque token
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  // Rotation chain: when this token is used, a new one is issued and this row's
+  // replacedById is set. Re-use of a revoked-and-replaced token = breach signal,
+  // and the entire chain is revoked.
+  replacedById String?   @unique @map("replaced_by_id")
+  userAgent    String?   @map("user_agent")
+  ip           String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  // Cascade is intentional here — RefreshTokens are ephemeral session state
+  // with no audit/forensic value once the Account is gone. Other Account
+  // relations use Restrict to preserve usage history.
+  account    Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("RefreshTokenChain", fields: [replacedById], references: [id])
+  replaces   RefreshToken? @relation("RefreshTokenChain")
+
+  @@index([accountId, expiresAt])
+  @@map("refresh_tokens")
+}
+
+// =============================================================================
+// Email tokens (one-time, for verify-email and reset-password flows)
+// =============================================================================
+
+model EmailToken {
+  id        String            @id @default(uuid())
+  accountId String            @map("account_id")
+  // sha256 of an opaque 32-byte random token. The plaintext is sent in the email
+  // link only — never stored. Verification = sha256(input) == tokenHash AND not
+  // used AND not expired.
+  tokenHash String            @unique @map("token_hash")
+  purpose   EmailTokenPurpose
+  expiresAt DateTime          @map("expires_at")
+  // One-time-use guard. Once set, the token is dead even before expiry.
+  usedAt    DateTime?         @map("used_at")
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  // Cascade: same rationale as RefreshToken — ephemeral, no audit value once the
+  // Account is gone (the corresponding audit_logs row carries the action history).
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  // Limits the "how many active reset links does this account have?" check.
+  @@index([accountId, purpose, usedAt])
+  @@map("email_tokens")
+}
+
+// =============================================================================
+// Applications & Application keys (data plane auth)
+// =============================================================================
+
+model Application {
+  id          String   @id @default(uuid())
+  accountId   String   @map("account_id")
+  name        String
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  account     Account          @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  keys        ApplicationKey[]
+  endUsers    EndUser[]
+  usageEvents UsageEvent[]
+
+  @@index([accountId])
+  @@map("applications")
+}
+
+model ApplicationKey {
+  id            String    @id @default(uuid())
+  applicationId String    @map("application_id")
+  // First 16 chars of the issued secret, e.g. "sk-rcn-live-abcd". Indexed for
+  // fast lookup on incoming requests (single argon2id verify after lookup).
+  keyPrefix     String    @unique @map("key_prefix")
+  keyHash       String    @map("key_hash") // argon2id of full secret
+  label         String?
+  lastUsedAt    DateTime? @map("last_used_at")
+  expiresAt     DateTime? @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Cascade from Application: deleting an app deletes its keys. The app itself
+  // cannot be hard-deleted if it has UsageEvents (Restrict on UsageEvent), so
+  // this Cascade only fires for empty apps in practice.
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  usageEvents UsageEvent[]
+
+  @@index([applicationId, revokedAt])
+  @@map("application_keys")
+}
+
+// =============================================================================
+// BYOK: Per-account provider keys (envelope encrypted)
+// =============================================================================
+
+model UserProviderKey {
+  id              String       @id @default(uuid())
+  accountId       String       @map("account_id")
+  provider        ProviderType
+  // Format: [12B IV][16B AuthTag][N B ciphertext], AES-256-GCM
+  encryptedKey    Bytes        @map("encrypted_key")
+  // Master key version used for encryption. Allows rotating MASTER_ENCRYPTION_KEY
+  // without touching ciphertext rows immediately (lazy re-encrypt on next use).
+  encryptionKeyId String       @map("encryption_key_id") // e.g. "v1"
+  label           String?
+  lastUsedAt      DateTime?    @map("last_used_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  // One key per provider per account (MVP). Drop this constraint later if we
+  // want multiple keys per provider (e.g. dev vs prod).
+  @@unique([accountId, provider])
+  @@map("user_provider_keys")
+}
+
+// =============================================================================
+// End users (per-Application, attribution only — no auth)
+// =============================================================================
+
+model EndUser {
+  id            String   @id @default(uuid())
+  applicationId String   @map("application_id")
+  externalId    String   @map("external_id") // ID from customer's app, opaque
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Cascade is fine here — EndUser rows are pure attribution metadata. If the
+  // Application is being hard-deleted (only possible when it has no UsageEvents
+  // due to Restrict on the usage relation), losing EndUser rows is irrelevant.
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  usageEvents UsageEvent[]
+
+  @@unique([applicationId, externalId])
+  @@map("end_users")
+}
+
+// =============================================================================
+// Usage Events (the analytics fact table)
+// =============================================================================
+
+model UsageEvent {
+  id               String  @id @default(uuid())
+  accountId        String  @map("account_id")
+  applicationId    String  @map("application_id")
+  applicationKeyId String  @map("application_key_id")
+  endUserId        String? @map("end_user_id")
+
+  // Routing & request
+  provider ProviderType
+  model    String
+  isStream Boolean      @default(false) @map("is_stream")
+
+  // Response
+  statusCode   Int     @map("status_code") // HTTP status sent to client
+  errorCode    String? @map("error_code") // upstream / our error code
+  finishReason String? @map("finish_reason") // stop, length, tool_use, content_filter, ...
+  requestId    String? @map("request_id") // upstream request id (anthropic-request-id, x-request-id)
+
+  // Token accounting
+  inputTokens         Int @default(0) @map("input_tokens")
+  outputTokens        Int @default(0) @map("output_tokens")
+  cacheReadTokens     Int @default(0) @map("cache_read_tokens")
+  cacheCreationTokens Int @default(0) @map("cache_creation_tokens")
+
+  // Cost (info-only, computed from ModelPricing at ingest time)
+  costUsd Decimal? @map("cost_usd") @db.Decimal(20, 10)
+
+  // Latency
+  ttftMs    Int? @map("ttft_ms") // time to first token (stream only)
+  latencyMs Int  @map("latency_ms") // total time client-side
+
+  // Free-form (system_fingerprint, region, model override info, etc.)
+  metadata       Json?
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Restrict on every required FK — UsageEvent is the analytics fact table and
+  // must outlive the Account/Application/Key that produced it. Hard delete only
+  // via the Phase 4 GDPR endpoint (anonymizes Account.email/name but keeps the
+  // usage rows intact for accounting aggregates).
+  account        Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  application    Application    @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  applicationKey ApplicationKey @relation(fields: [applicationKeyId], references: [id], onDelete: Restrict)
+  // EndUser FK is optional — Prisma default for optional is SetNull, so removing
+  // an EndUser keeps its UsageEvents but anonymizes the attribution.
+  endUser        EndUser?       @relation(fields: [endUserId], references: [id])
+  // BRIN index for full-table range scans is added via raw SQL — see bottom.
+
+  // Hot paths (analytics dashboard) — see /PLAN.md Phase 3 backend.
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([applicationId, createdAt(sort: Desc)])
+  @@index([applicationId, model, createdAt(sort: Desc)])
+  @@map("usage_events")
+}
+
+// =============================================================================
+// Model pricing (info-only, drives costUsd computation)
+// =============================================================================
+
+model ModelPricing {
+  id          String       @id @default(uuid())
+  provider    ProviderType
+  model       String
+  // Cost type: INPUT_TOKEN, OUTPUT_TOKEN, CACHE_READ_TOKEN, CACHE_WRITE_TOKEN
+  costType    String       @map("cost_type")
+  costPerUnit Decimal      @map("cost_per_unit") @db.Decimal(20, 10)
+  unitSize    Int          @default(1000000) @map("unit_size") // per-million by default
+  currency    String       @default("USD")
+  validFrom   DateTime     @default(now()) @map("valid_from")
+  validUntil  DateTime?    @map("valid_until")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@unique([provider, model, costType, validFrom])
+  @@index([provider, model])
+  @@map("model_pricing")
+}
+
+// =============================================================================
+// Webhooks
+// =============================================================================
+
+model WebhookConfig {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  url       String
+  secret    String // HMAC signing key (raw bytes, base64-encoded)
+  // Subscribed events. Allowed values (validated in service layer):
+  //   "usage.recorded", "request.error", "provider_key.invalid",
+  //   "application.created", "application.deleted",
+  //   "key.created", "key.revoked",
+  //   "alert.triggered"
+  events    String[]
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account    Account           @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  deliveries WebhookDelivery[]
+
+  @@index([accountId])
+  @@map("webhook_configs")
+}
+
+model WebhookDelivery {
+  id          String    @id @default(uuid())
+  webhookId   String    @map("webhook_id")
+  event       String
+  payload     Json
+  statusCode  Int?      @map("status_code")
+  response    String?
+  attempts    Int       @default(0)
+  deliveredAt DateTime? @map("delivered_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Cascade: deliveries are append-only logs scoped to a webhook config. If the
+  // config is hard-deleted (only after Account hard-delete), they go too.
+  webhook WebhookConfig @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt(sort: Desc)])
+  @@map("webhook_deliveries")
+}
+
+// =============================================================================
+// Alerts
+// =============================================================================
+
+model AlertRule {
+  id            String        @id @default(uuid())
+  accountId     String        @map("account_id")
+  type          AlertRuleType
+  // Threshold semantics depend on `type`:
+  //   USAGE_THRESHOLD  — cents (or tokens, see metadata.unit)
+  //   DAILY_LIMIT      — cents
+  //   ERROR_RATE_HIGH  — basis points (e.g. 500 = 5%)
+  //   LATENCY_P95_HIGH — milliseconds
+  threshold     Int
+  // Optional: scope to a single application (null = whole account)
+  applicationId String?       @map("application_id")
+  channel       AlertChannel  @default(EMAIL)
+  isActive      Boolean       @default(true) @map("is_active")
+  lastTriggered DateTime?     @map("last_triggered")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, isActive])
+  @@map("alert_rules")
+}
+
+// =============================================================================
+// Audit log
+// =============================================================================
+
+model AuditLog {
+  id        String         @id @default(uuid())
+  // Intentionally NOT a foreign key. AuditLogs must survive Account hard-delete
+  // (GDPR anonymization keeps the row, just with PII stripped from metadata).
+  accountId String?        @map("account_id")
+  actorType AuditActorType @map("actor_type")
+  actorId   String?        @map("actor_id")
+  // Known actions (full audit mode — see /PLAN.md §“Full audit on BYOK”):
+  //
+  //   Auth:           account.registered, account.login, account.logout,
+  //                   account.password_changed, account.email_verified,
+  //                   account.soft_deleted, account.hard_deleted (GDPR)
+  //   Applications:   application.created, application.updated, application.deleted
+  //   Keys:           key.created, key.revoked
+  //   BYOK:           provider_key.created, provider_key.deleted,
+  //                   provider_key.test_succeeded, provider_key.test_failed,
+  //                   provider_key.invalid_at_provider,
+  //                   provider_key.encrypted, provider_key.decrypted,
+  //                   provider_key.decryption_failed,
+  //                   provider_key.master_key_rotated
+  //   Admin:          pricing.updated, pricing.deleted, account.impersonated
+  action    String
+  // Optional resource identifier ("application:<uuid>", "key:<uuid>", ...)
+  resource  String?
+  // Free-form per-event payload. NEVER store BYOK plaintext or raw passwords.
+  // For provider_key.decrypted: { keyId, provider, requestId, model } only.
+  metadata  Json?
+  ipAddress String?        @map("ip_address")
+  userAgent String?        @map("user_agent")
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([action])
+  // BRIN on created_at for retention sweeps — added via raw migration, see bottom.
+  @@map("audit_logs")
+}
+
+// =============================================================================
+// Raw SQL extras (apply after `prisma migrate dev`)
+// =============================================================================
+//
+// Prisma does not natively model BRIN indexes without `previewFeatures`. Add a
+// follow-up migration manually:
+//
+//   pnpm prisma migrate dev --create-only --name usage_events_brin
+//   # then edit the generated migration.sql to append:
+//   #   CREATE INDEX idx_usage_created_brin
+//   #     ON usage_events USING BRIN (created_at);
+//   pnpm prisma migrate dev
+//
+// Optional, deferred to Phase 3 if usage_events grows >10M rows:
+//
+//   CREATE MATERIALIZED VIEW usage_daily AS
+//     SELECT account_id, application_id, provider, model,
+//            date_trunc('day', created_at) AS day,
+//            count(*)                       AS requests,
+//            sum(input_tokens)              AS input_tokens,
+//            sum(output_tokens)             AS output_tokens,
+//            sum(cost_usd)                  AS cost_usd,
+//            percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_latency_ms
+//       FROM usage_events
+//      GROUP BY 1, 2, 3, 4, 5;
+//   CREATE UNIQUE INDEX ON usage_daily (account_id, application_id, provider, model, day);
+//   -- refresh hourly:
+//   REFRESH MATERIALIZED VIEW CONCURRENTLY usage_daily;
+//
+// =============================================================================
+// Audit log retention (full audit mode)
+// =============================================================================
+//
+// FULL AUDIT means audit_logs grows ~at request rate (one `provider_key.decrypted`
+// per data plane call). Without retention, this table will outgrow usage_events
+// because some actions (login, key CRUD) add to the same write rate.
+//
+// Phase 1 mitigation — add the BRIN index now:
+//
+//   CREATE INDEX idx_audit_created_brin
+//     ON audit_logs USING BRIN (created_at);
+//
+// Phase 4 retention worker — daily cron (BullMQ `audit-retention` queue):
+//
+//   -- 90-day rolling window for hot-path BYOK events
+//   DELETE FROM audit_logs
+//    WHERE created_at < NOW() - INTERVAL '90 days'
+//      AND action IN ('provider_key.decrypted', 'provider_key.encrypted');
+//
+//   -- 2-year window for security-sensitive actions (everything else)
+//   DELETE FROM audit_logs
+//    WHERE created_at < NOW() - INTERVAL '2 years';
+//
+// If the table outgrows the worker (>1B rows), switch to monthly partitioning:
+//
+//   ALTER TABLE audit_logs RENAME TO audit_logs_legacy;
+//   CREATE TABLE audit_logs (LIKE audit_logs_legacy INCLUDING ALL)
+//     PARTITION BY RANGE (created_at);
+//   -- then create monthly partitions via pg_partman or manual DDL.
+//
+// =============================================================================

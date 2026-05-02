@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Customer & Users
+// ============================================================================
+
+model Customer {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  apiKeyHash   String   @map("api_key_hash")
+  tier         String   @default("free") // free, pro, enterprise
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  users            User[]
+  wallets          CreditWallet[]
+  usageEvents      UsageEvent[]
+  entitlements     Entitlement[]
+  webhookConfigs   WebhookConfig[]
+  alertRules       AlertRule[]
+
+  @@map("customers")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  customerId   String   @map("customer_id")
+  externalId   String   @map("external_id") // User ID from customer's app
+  name         String?
+  email        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  customer     Customer @relation(fields: [customerId], references: [id])
+  usageEvents  UsageEvent[]
+
+  @@unique([customerId, externalId])
+  @@map("users")
+}
+
+// ============================================================================
+// Credits & Wallets
+// ============================================================================
+
+model CreditWallet {
+  id               String   @id @default(uuid())
+  customerId       String   @map("customer_id")
+  userId           String?  @map("user_id")
+  balance          Decimal  @default(0) @db.Decimal(20, 4)
+  reservedBalance  Decimal  @default(0) @map("reserved_balance") @db.Decimal(20, 4)
+  currency         String   @default("USD")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  transactions     CreditTransaction[]
+
+  @@map("credit_wallets")
+}
+
+model CreditTransaction {
+  id              String   @id @default(uuid())
+  walletId        String   @map("wallet_id")
+  customerId      String   @map("customer_id")
+  type            TransactionType
+  amount          Decimal  @db.Decimal(20, 4) // positive = credit, negative = debit
+  balanceBefore   Decimal  @map("balance_before") @db.Decimal(20, 4)
+  balanceAfter    Decimal  @map("balance_after") @db.Decimal(20, 4)
+  description     String?
+  metadata        Json?
+  idempotencyKey  String?  @unique @map("idempotency_key")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  wallet          CreditWallet @relation(fields: [walletId], references: [id])
+
+  @@map("credit_transactions")
+}
+
+enum TransactionType {
+  GRANT
+  PURCHASE
+  BURN
+  REFUND
+  EXPIRATION
+}
+
+// ============================================================================
+// Usage Events
+// ============================================================================
+
+model UsageEvent {
+  id                    String   @id @default(uuid())
+  customerId            String   @map("customer_id")
+  userId                String?  @map("user_id")
+  eventType             String   @map("event_type") // TOKEN_USAGE, IMAGE_GENERATION, etc.
+  featureId             String   @map("feature_id")
+  provider              String?  // ANTHROPIC, OPENAI, GOOGLE
+  model                 String?
+  inputTokens           Int      @default(0) @map("input_tokens")
+  outputTokens          Int      @default(0) @map("output_tokens")
+  cacheReadTokens       Int      @default(0) @map("cache_read_tokens")
+  cacheCreationTokens   Int      @default(0) @map("cache_creation_tokens")
+  creditsBurned         Int      @default(0) @map("credits_burned")
+  costUsd               Decimal? @map("cost_usd") @db.Decimal(20, 10)
+  metadata              Json?
+  idempotencyKey        String?  @unique @map("idempotency_key")
+  timestamp             DateTime @default(now())
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  customer              Customer @relation(fields: [customerId], references: [id])
+  user                  User?    @relation(fields: [userId], references: [id])
+
+  @@index([customerId, timestamp])
+  @@index([provider, model])
+  @@index([eventType])
+  @@map("usage_events")
+}
+
+// ============================================================================
+// Provider Pricing
+// ============================================================================
+
+model ProviderCost {
+  id           String   @id @default(uuid())
+  provider     String   // ANTHROPIC, OPENAI, GOOGLE
+  model        String   // claude-sonnet-4-5, gpt-4o, etc.
+  costType     String   @map("cost_type") // INPUT_TOKEN, OUTPUT_TOKEN, CACHE_READ_TOKEN, CACHE_WRITE_TOKEN, IMAGE, VIDEO
+  costPerUnit  Decimal  @map("cost_per_unit") @db.Decimal(20, 10)
+  unitSize     Int      @default(1000000) @map("unit_size")
+  currency     String   @default("USD")
+  validFrom    DateTime @default(now()) @map("valid_from")
+  validUntil   DateTime? @map("valid_until")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([provider, model, costType, validFrom])
+  @@index([provider, model])
+  @@map("provider_costs")
+}
+
+// ============================================================================
+// Entitlements (Feature Gating)
+// ============================================================================
+
+model Entitlement {
+  id          String   @id @default(uuid())
+  customerId  String   @map("customer_id")
+  featureId   String   @map("feature_id")   // "ai-chat", "image-gen", "model:claude-opus"
+  limitType   String   @map("limit_type")   // HARD, SOFT, NONE
+  limitValue  Int      @map("limit_value")   // credit amount
+  period      String   @default("MONTHLY")  // DAILY, MONTHLY, TOTAL
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  @@unique([customerId, featureId, period])
+  @@map("entitlements")
+}
+
+// ============================================================================
+// Webhooks
+// ============================================================================
+
+model WebhookConfig {
+  id          String   @id @default(uuid())
+  customerId  String   @map("customer_id")
+  url         String
+  secret      String                         // HMAC signing key
+  events      String[]                       // ["usage.threshold", "balance.low", "proxy.error"]
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  @@map("webhook_configs")
+}
+
+model WebhookDelivery {
+  id            String    @id @default(uuid())
+  webhookId     String    @map("webhook_id")
+  event         String
+  payload       Json
+  statusCode    Int?      @map("status_code")
+  response      String?
+  attempts      Int       @default(0)
+  deliveredAt   DateTime? @map("delivered_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([webhookId])
+  @@map("webhook_deliveries")
+}
+
+// ============================================================================
+// Alerts
+// ============================================================================
+
+model AlertRule {
+  id            String    @id @default(uuid())
+  customerId    String    @map("customer_id")
+  type          String                          // BALANCE_LOW, USAGE_THRESHOLD, DAILY_LIMIT
+  threshold     Int                             // e.g. 20 (% or credits)
+  channel       String    @default("email")    // email, webhook, both
+  isActive      Boolean   @default(true) @map("is_active")
+  lastTriggered DateTime? @map("last_triggered")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  customer      Customer  @relation(fields: [customerId], references: [id])
+
+  @@map("alert_rules")
+}
+
+// ============================================================================
+// Audit Log
+// ============================================================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  customerId  String?  @map("customer_id")
+  actorType   String   @map("actor_type")    // CUSTOMER, ADMIN, SYSTEM
+  actorId     String?  @map("actor_id")
+  action      String                          // API_KEY_ROTATED, CREDITS_BURNED, PRICING_UPDATED
+  resource    String?                         // "proxy", "billing", "auth"
+  metadata    Json?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([customerId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}
