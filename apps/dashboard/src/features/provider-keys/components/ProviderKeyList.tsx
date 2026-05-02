@@ -220,7 +220,8 @@ const TestResultRow = React.memo(function TestResultRow({
   const messages: Record<string, string> = {
     INVALID_KEY: 'Provider odrzucił klucz jako nieprawidłowy. Sprawdź czy nie został zrotowany.',
     RATE_LIMITED: 'Provider zwrócił rate limit — spróbuj ponownie za chwilę.',
-    NETWORK_ERROR: 'Nie udało się dotrzeć do providera (timeout lub problem sieciowy).',
+    NETWORK_ERROR: 'Nie udało się dotrzeć do providera (problem sieciowy lub DNS).',
+    TIMEOUT: 'Provider nie odpowiedział w 5 s. Spróbuj ponownie lub sprawdź status providera.',
     UNKNOWN: `Provider zwrócił błąd ${result.upstreamStatus ?? '?'}.`,
   }
   return (
@@ -233,6 +234,13 @@ const TestResultRow = React.memo(function TestResultRow({
         {result.upstreamStatus && (
           <p className="mt-1 text-xs text-neutral-500">
             Upstream HTTP {result.upstreamStatus}
+          </p>
+        )}
+        {/* `message` is added in the latest backend schema; cast to read it
+            until the next Orval regeneration picks it up locally. */}
+        {(result as { message?: string }).message && (
+          <p className="mt-1 break-words text-xs text-neutral-500">
+            <span className="font-mono">{(result as { message?: string }).message}</span>
           </p>
         )}
       </div>
