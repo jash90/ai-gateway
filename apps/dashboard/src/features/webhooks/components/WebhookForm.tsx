@@ -109,7 +109,7 @@ export const WebhookForm = React.memo(function WebhookForm({
       })
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: getWebhooksControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getWebhooksControllerListQueryKey() })
       onOpenChange(false)
       if (isEdit) {
         toast.success('Webhook zaktualizowany.')

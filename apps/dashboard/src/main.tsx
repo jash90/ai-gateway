@@ -48,7 +48,7 @@ async function bootstrap() {
 
 const rootElement = document.getElementById('root')!
 
-bootstrap().then(() => {
+void bootstrap().then(() => {
   createRoot(rootElement).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>

@@ -8,7 +8,7 @@ function RegisterPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated())
 
   React.useEffect(() => {
-    if (isAuthenticated) navigate({ to: '/overview' })
+    if (isAuthenticated) void navigate({ to: '/overview' })
   }, [isAuthenticated, navigate])
 
   return <RegisterForm />

@@ -115,7 +115,7 @@ export const ProviderKeyForm = React.memo(function ProviderKeyForm({
       }),
     onSuccess: () => {
       toast.success('Klucz BYOK zapisany.')
-      queryClient.invalidateQueries({ queryKey: getProviderKeysControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getProviderKeysControllerListQueryKey() })
       onOpenChange(false)
     },
     onError: (err) => {

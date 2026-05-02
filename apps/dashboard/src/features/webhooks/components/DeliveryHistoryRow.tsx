@@ -44,7 +44,7 @@ export const DeliveryHistoryRow = React.memo(function DeliveryHistoryRow({
       toast.success('Delivery zakolejkowany do ponownego wysłania.')
       // Refresh deliveries list — the new attempt will appear shortly.
       setTimeout(() => {
-        queryClient.invalidateQueries({
+        void queryClient.invalidateQueries({
           queryKey: getWebhooksControllerListDeliveriesQueryKey(webhookId),
         })
       }, 2000)

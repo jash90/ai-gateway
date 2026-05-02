@@ -45,7 +45,7 @@ export const WebhookList = React.memo(function WebhookList() {
     mutationFn: (id: string) => webhooksControllerDelete(id),
     onSuccess: () => {
       toast.success('Webhook usunięty.')
-      queryClient.invalidateQueries({ queryKey: getWebhooksControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getWebhooksControllerListQueryKey() })
     },
     onError: (err) => {
       toast.error(

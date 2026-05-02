@@ -96,9 +96,9 @@ export const AppForm = React.memo(function AppForm({
     },
     onSuccess: (data) => {
       toast.success(isEdit ? 'Aplikacja zaktualizowana.' : 'Aplikacja utworzona.')
-      queryClient.invalidateQueries({ queryKey: getApplicationsControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getApplicationsControllerListQueryKey() })
       if (app) {
-        queryClient.invalidateQueries({
+        void queryClient.invalidateQueries({
           queryKey: getApplicationsControllerGetByIdQueryKey(app.id),
         })
       }

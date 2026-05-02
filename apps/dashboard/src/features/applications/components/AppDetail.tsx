@@ -46,10 +46,10 @@ export const AppDetail = React.memo(function AppDetail({ applicationId }: AppDet
       applicationsControllerUpdate(applicationId, { isActive }),
     onSuccess: (_data, isActive) => {
       toast.success(isActive ? 'Aplikacja włączona.' : 'Aplikacja wyłączona.')
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: getApplicationsControllerGetByIdQueryKey(applicationId),
       })
-      queryClient.invalidateQueries({ queryKey: getApplicationsControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getApplicationsControllerListQueryKey() })
     },
     onError: (err) => {
       toast.error(
@@ -62,8 +62,8 @@ export const AppDetail = React.memo(function AppDetail({ applicationId }: AppDet
     mutationFn: () => applicationsControllerDelete(applicationId),
     onSuccess: () => {
       toast.success('Aplikacja usunięta.')
-      queryClient.invalidateQueries({ queryKey: getApplicationsControllerListQueryKey() })
-      navigate({ to: '/applications' })
+      void queryClient.invalidateQueries({ queryKey: getApplicationsControllerListQueryKey() })
+      void navigate({ to: '/applications' })
     },
     onError: (err) => {
       const apiErr = err instanceof ApiError ? err : null

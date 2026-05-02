@@ -53,7 +53,7 @@ export const Sidebar = React.memo(function Sidebar({ collapsed, onToggle }: Side
 
   const handleLogout = () => {
     logout()
-    router.navigate({ to: '/login' })
+    void router.navigate({ to: '/login' })
   }
 
   return (

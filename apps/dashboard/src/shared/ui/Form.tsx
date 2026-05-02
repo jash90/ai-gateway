@@ -72,7 +72,7 @@ export function useZodForm<TSchema extends ZodLikeSchema>(
 ) {
   return useForm<TSchema['_input']>({
     ...options,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     resolver: zodResolver(schema as any),
   })
 }

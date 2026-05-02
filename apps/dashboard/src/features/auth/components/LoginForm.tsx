@@ -40,7 +40,7 @@ export const LoginForm = React.memo(function LoginForm() {
       // FE-S1-006 / Bugfix #2: hydrate account from /login response, no /me roundtrip.
       setLogin(data)
       toast.success('Zalogowano pomyślnie.')
-      navigate({ to: '/overview' })
+      void navigate({ to: '/overview' })
     },
     onError: (err) => {
       const message =

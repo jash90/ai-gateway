@@ -167,7 +167,7 @@ export const AlertForm = React.memo(function AlertForm({
     },
     onSuccess: () => {
       toast.success(isEdit ? 'Reguła zaktualizowana.' : 'Reguła utworzona.')
-      queryClient.invalidateQueries({ queryKey: getAlertsControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getAlertsControllerListQueryKey() })
       onOpenChange(false)
     },
     onError: (err) => {

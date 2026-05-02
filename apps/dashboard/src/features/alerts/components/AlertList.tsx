@@ -43,7 +43,7 @@ export const AlertList = React.memo(function AlertList() {
     mutationFn: (id: string) => alertsControllerDelete(id),
     onSuccess: () => {
       toast.success('Reguła usunięta.')
-      queryClient.invalidateQueries({ queryKey: getAlertsControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getAlertsControllerListQueryKey() })
     },
     onError: (err) => {
       toast.error(

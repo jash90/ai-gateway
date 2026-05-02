@@ -45,7 +45,7 @@ export const ProviderKeyList = React.memo(function ProviderKeyList() {
     mutationFn: (keyId: string) => providerKeysControllerDelete(keyId),
     onSuccess: () => {
       toast.success('Klucz BYOK usunięty.')
-      queryClient.invalidateQueries({ queryKey: getProviderKeysControllerListQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getProviderKeysControllerListQueryKey() })
     },
     onError: (err) => {
       toast.error(

@@ -25,7 +25,7 @@ function RootLayout() {
 
   React.useEffect(() => {
     if (!isPublicRoute && !isAuthenticated) {
-      router.navigate({ to: '/login' })
+      void router.navigate({ to: '/login' })
     }
   }, [isPublicRoute, isAuthenticated, router])
 

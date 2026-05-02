@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Plus, Key, Ban, MoreVertical, ShieldOff } from 'lucide-react'
+import { Plus, Key, Ban, ShieldOff } from 'lucide-react'
 import { Button } from '@shared/ui/Button'
 import { Card, CardContent } from '@shared/ui/Card'
 import { Skeleton } from '@shared/ui/Skeleton'
@@ -42,7 +42,7 @@ export const KeyList = React.memo(function KeyList({ applicationId }: KeyListPro
     mutationFn: () => applicationKeysControllerCreate(applicationId, {}),
     onSuccess: (data) => {
       setRevealKey(data as ApplicationKeyCreatedDto)
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: getApplicationKeysControllerListQueryKey(applicationId),
       })
     },
@@ -57,7 +57,7 @@ export const KeyList = React.memo(function KeyList({ applicationId }: KeyListPro
     mutationFn: (keyId: string) => applicationKeysControllerRevoke(applicationId, keyId),
     onSuccess: () => {
       toast.success('Klucz został cofnięty.')
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: getApplicationKeysControllerListQueryKey(applicationId),
       })
     },

@@ -54,7 +54,7 @@ export const ResetPasswordForm = React.memo(function ResetPasswordForm({
       resetPassword({ token: token!, newPassword: values.password }),
     onSuccess: () => {
       toast.success('Hasło zostało zmienione. Zaloguj się nowym hasłem.')
-      navigate({ to: '/login' })
+      void navigate({ to: '/login' })
     },
     onError: (err) => {
       const message =
