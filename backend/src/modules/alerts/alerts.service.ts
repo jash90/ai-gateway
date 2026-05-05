@@ -155,7 +155,7 @@ export class AlertsService {
     const windowStart = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000)
 
     const appFilter = input.applicationId
-      ? Prisma.sql`AND application_id = ${input.applicationId}::uuid`
+      ? Prisma.sql`AND application_id = ${input.applicationId}`
       : Prisma.empty
 
     interface Bucket { bucket: Date; measured: number }
@@ -168,7 +168,7 @@ export class AlertsService {
           SELECT date_trunc('day', created_at) AS bucket,
                  (sum(coalesce(cost_usd, 0)) * 100)::float AS measured
           FROM usage_events
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${accountId}
             AND created_at >= ${windowStart}
             ${appFilter}
           GROUP BY 1 ORDER BY 1
@@ -188,7 +188,7 @@ export class AlertsService {
           SELECT date_trunc('day', created_at) AS bucket,
                  (sum(coalesce(cost_usd, 0)) * 100)::float AS measured
           FROM usage_events
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${accountId}
             AND created_at >= ${windowStart}
             ${appFilter}
           GROUP BY 1 ORDER BY 1
@@ -204,7 +204,7 @@ export class AlertsService {
                    count(*)::float AS total,
                    count(*) FILTER (WHERE status_code >= 400)::float AS errors
             FROM usage_events
-            WHERE account_id = ${accountId}::uuid
+            WHERE account_id = ${accountId}
               AND created_at >= ${windowStart}
               ${appFilter}
             GROUP BY 1
@@ -222,7 +222,7 @@ export class AlertsService {
                    count(*) AS total,
                    percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95
             FROM usage_events
-            WHERE account_id = ${accountId}::uuid
+            WHERE account_id = ${accountId}
               AND created_at >= ${windowStart}
               ${appFilter}
             GROUP BY 1

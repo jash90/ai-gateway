@@ -126,10 +126,10 @@ export class AlertsEvaluatorService {
         const result = await this.prisma.$queryRaw<Array<{ p95: number | null }>>`
           SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS p95
           FROM usage_events
-          WHERE account_id = ${rule.accountId}::uuid
+          WHERE account_id = ${rule.accountId}
             AND created_at >= ${last1h}
             ${rule.applicationId
-              ? Prisma.sql`AND application_id = ${rule.applicationId}::uuid`
+              ? Prisma.sql`AND application_id = ${rule.applicationId}`
               : Prisma.empty}
         `
         measured = Math.round(result[0]?.p95 ?? 0)

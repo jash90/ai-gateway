@@ -46,6 +46,15 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   async onModuleInit() {
     await this.$connect();
 
+    // Force UTC for every session. Our timestamp columns are `timestamp WITHOUT
+    // time zone` (Prisma DateTime default mapping) but Prisma writes UTC values.
+    // If the server's local timezone differs (e.g. Europe/Warsaw on dev macs),
+    // Postgres compares incoming timestamptz parameters to naive columns using
+    // session TZ — which silently shifts ranges by the offset. Anchoring the
+    // session to UTC guarantees `created_at >= now() - interval '1 hour'`
+    // means the same thing for every connection.
+    await this.$executeRawUnsafe(`SET TIME ZONE 'UTC'`);
+
     // Capture the raw delegate BEFORE applying the extension. The right-hand
     // side hits the original PrismaClient getter; assigning to a regular
     // instance property stores a stable reference that subsequent calls to

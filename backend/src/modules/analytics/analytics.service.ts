@@ -79,14 +79,18 @@ export class AnalyticsService {
   }
 
   private async computeP95Latency(accountId: string, range: DateRange): Promise<number> {
+    // NOTE: usage_events.account_id / application_id are TEXT columns
+    // (not Postgres uuid) — Prisma binds string params as text, so no
+    // explicit ::uuid cast (it would fail with "operator does not exist:
+    // text = uuid" on Postgres ≥ 14).
     const result = await this.prisma.$queryRaw<Array<{ p95: number | null }>>`
       SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS p95
       FROM usage_events
-      WHERE account_id = ${accountId}::uuid
+      WHERE account_id = ${accountId}
         AND created_at >= ${range.from}
         AND created_at <= ${range.to}
         ${range.applicationId
-          ? Prisma.sql`AND application_id = ${range.applicationId}::uuid`
+          ? Prisma.sql`AND application_id = ${range.applicationId}`
           : Prisma.empty}
     `
     return result[0]?.p95 ?? 0
@@ -191,8 +195,9 @@ export class AnalyticsService {
   ) {
     const truncFn = granularity === 'hour' ? 'hour' : 'day'
 
+    // See note in computeP95Latency — account_id / application_id are TEXT, no ::uuid cast.
     const appFilter = range.applicationId
-      ? Prisma.sql`AND application_id = ${range.applicationId}::uuid`
+      ? Prisma.sql`AND application_id = ${range.applicationId}`
       : Prisma.empty
 
     let rows: Array<{ bucket: Date; value: number | null }>
@@ -201,7 +206,7 @@ export class AnalyticsService {
         rows = await this.prisma.$queryRaw<Array<{ bucket: Date; value: number }>>`
           SELECT date_trunc(${truncFn}, created_at) AS bucket, count(*)::float AS value
           FROM usage_events
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${accountId}
             AND created_at >= ${range.from} AND created_at <= ${range.to}
             ${appFilter}
           GROUP BY 1 ORDER BY 1
@@ -212,7 +217,7 @@ export class AnalyticsService {
           SELECT date_trunc(${truncFn}, created_at) AS bucket,
                  (sum(input_tokens) + sum(output_tokens))::float AS value
           FROM usage_events
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${accountId}
             AND created_at >= ${range.from} AND created_at <= ${range.to}
             ${appFilter}
           GROUP BY 1 ORDER BY 1
@@ -223,7 +228,7 @@ export class AnalyticsService {
           SELECT date_trunc(${truncFn}, created_at) AS bucket,
                  coalesce(sum(cost_usd), 0)::float AS value
           FROM usage_events
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${accountId}
             AND created_at >= ${range.from} AND created_at <= ${range.to}
             ${appFilter}
           GROUP BY 1 ORDER BY 1
@@ -234,7 +239,7 @@ export class AnalyticsService {
           SELECT date_trunc(${truncFn}, created_at) AS bucket,
                  percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS value
           FROM usage_events
-          WHERE account_id = ${accountId}::uuid
+          WHERE account_id = ${accountId}
             AND created_at >= ${range.from} AND created_at <= ${range.to}
             ${appFilter}
           GROUP BY 1 ORDER BY 1
