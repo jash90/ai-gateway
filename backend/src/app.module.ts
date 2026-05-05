@@ -19,6 +19,9 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module'
 import { AdminModule } from './modules/admin/admin.module'
 import { WebhooksModule } from './modules/webhooks/webhooks.module'
 import { AlertsModule } from './modules/alerts/alerts.module'
+import { WalletModule } from './modules/wallet/wallet.module'
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module'
+import { BillingModule } from './modules/billing/billing.module'
 import { PrismaService } from './prisma/prisma.service'
 
 function parseRedisUrl(url: string) {
@@ -76,6 +79,9 @@ function parseRedisUrl(url: string) {
     AdminModule,
     WebhooksModule,
     AlertsModule,
+    WalletModule,
+    FeatureFlagsModule,
+    BillingModule,
   ],
   providers: [
     PrismaService,

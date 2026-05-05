@@ -12,6 +12,7 @@ import {
   BookOpen,
   ChevronLeft,
   LogOut,
+  Wallet,
 } from 'lucide-react'
 import { Link as RouterLink, useRouter } from '@tanstack/react-router'
 import { cn } from '@shared/utils/cn'
@@ -29,12 +30,13 @@ const userNav: NavItem[] = [
   { label: 'Przegląd', href: '/overview', icon: <LayoutDashboard className="h-4 w-4" /> },
   { label: 'Aplikacje', href: '/applications', icon: <AppWindow className="h-4 w-4" /> },
   { label: 'Klucze BYOK', href: '/settings/provider-keys', icon: <Key className="h-4 w-4" /> },
+  { label: 'Płatności', href: '/settings/billing', icon: <Wallet className="h-4 w-4" /> },
   { label: 'Analityka', href: '/analytics', icon: <BarChart3 className="h-4 w-4" /> },
   { label: 'Playground', href: '/proxy/playground', icon: <Terminal className="h-4 w-4" /> },
   { label: 'Ustawienia', href: '/settings', icon: <Settings className="h-4 w-4" /> },
   { label: 'Webhooki', href: '/settings/webhooks', icon: <Link className="h-4 w-4" /> },
   { label: 'Alerty', href: '/settings/alerts', icon: <Bell className="h-4 w-4" /> },
-  { label: 'Dokumentacja', href: '/docs', icon: <BookOpen className="h-4 w-4" /> },
+  { label: 'Dokumentacja', href: '/integration', icon: <BookOpen className="h-4 w-4" /> },
 ]
 
 const adminNav: NavItem[] = [

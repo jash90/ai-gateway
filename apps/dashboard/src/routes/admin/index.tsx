@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Users, FileText, DollarSign } from 'lucide-react'
+import { Users, FileText, DollarSign, CreditCard } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@shared/ui/Card'
 import { useAuthStore } from '@shared/stores/auth-store'
 
@@ -30,7 +30,13 @@ const AdminIndexPage = React.memo(function AdminIndexPage() {
         <p className="text-sm text-neutral-500">Dostęp do systemowych metryk i kont.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <AdminCard
+          to="/admin/billing"
+          icon={<CreditCard className="h-5 w-5" />}
+          title="Billing — Stripe"
+          description="Skonfiguruj klucze API i webhook endpoint"
+        />
         <AdminCard
           to="/admin/customers"
           icon={<Users className="h-5 w-5" />}

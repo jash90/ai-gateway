@@ -19,6 +19,9 @@ async function bootstrap() {
       // and IP-attributed audit logs see the real client. See env config.
       trustProxy: env.TRUST_PROXY,
     }),
+    // Stripe webhook signature verify needs the EXACT request bytes.
+    // `rawBody: true` exposes `request.rawBody: Buffer` on every route.
+    { rawBody: true },
   )
 
   // Many HTTP clients (Orval-generated TanStack Query, browser fetch wrappers)
@@ -40,6 +43,10 @@ async function bootstrap() {
       }
       done(null, payload)
     })
+
+  // Note: `rawBody: true` was passed to NestFactory.create above. That flag
+  // makes `request.rawBody: Buffer` available globally — used by the Stripe
+  // webhook controller to verify signatures via Stripe.webhooks.constructEvent.
 
   // No global prefix — controllers already include 'v1' in their routes
   // health controller is excluded from auth by @Public() decorator

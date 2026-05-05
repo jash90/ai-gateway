@@ -138,6 +138,14 @@ function mapErrorCodeToPolish(code: string | null): string | null {
       return 'To konto zostało usunięte.'
     case 'RATE_LIMITED':
       return 'Zbyt wiele prób. Spróbuj ponownie za chwilę.'
+    case 'INSUFFICIENT_TOKEN_BALANCE':
+      return 'Brak tokenów. Doładuj saldo w Ustawieniach → Płatności.'
+    case 'PROVIDER_INSUFFICIENT_FUNDS':
+      return 'Twój klucz providera nie ma środków u dostawcy AI.'
+    case 'MAX_TOKENS_REQUIRED_LOW_BALANCE':
+      return 'Wymagane pole `max_tokens` przy niskim saldzie.'
+    case 'STRIPE_NOT_CONFIGURED':
+      return 'Operator nie skonfigurował jeszcze Stripe. Spróbuj później.'
     default:
       return null
   }

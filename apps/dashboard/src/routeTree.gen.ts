@@ -14,8 +14,8 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as OverviewRouteImport } from './routes/overview'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as IntegrationRouteImport } from './routes/integration'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
-import { Route as DocsRouteImport } from './routes/docs'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as ApplicationsIndexRouteImport } from './routes/applications/index'
@@ -23,6 +23,7 @@ import { Route as AnalyticsIndexRouteImport } from './routes/analytics/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as SettingsWebhooksRouteImport } from './routes/settings/webhooks'
 import { Route as SettingsProviderKeysRouteImport } from './routes/settings/provider-keys'
+import { Route as SettingsBillingRouteImport } from './routes/settings/billing'
 import { Route as SettingsAlertsRouteImport } from './routes/settings/alerts'
 import { Route as ProxyPlaygroundRouteImport } from './routes/proxy/playground'
 import { Route as ApplicationsIdRouteImport } from './routes/applications/$id'
@@ -30,6 +31,8 @@ import { Route as AnalyticsEventsRouteImport } from './routes/analytics/events'
 import { Route as AdminPricingRouteImport } from './routes/admin/pricing'
 import { Route as AdminCustomersRouteImport } from './routes/admin/customers'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin/audit-logs'
+import { Route as AdminBillingIndexRouteImport } from './routes/admin/billing/index'
+import { Route as AdminBillingProductsRouteImport } from './routes/admin/billing/products'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
   id: '/verify-email',
@@ -56,14 +59,14 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IntegrationRoute = IntegrationRouteImport.update({
+  id: '/integration',
+  path: '/integration',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsRoute = DocsRouteImport.update({
-  id: '/docs',
-  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -101,6 +104,11 @@ const SettingsProviderKeysRoute = SettingsProviderKeysRouteImport.update({
   path: '/settings/provider-keys',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsBillingRoute = SettingsBillingRouteImport.update({
+  id: '/settings/billing',
+  path: '/settings/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsAlertsRoute = SettingsAlertsRouteImport.update({
   id: '/settings/alerts',
   path: '/settings/alerts',
@@ -136,11 +144,21 @@ const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
   path: '/admin/audit-logs',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminBillingIndexRoute = AdminBillingIndexRouteImport.update({
+  id: '/admin/billing/',
+  path: '/admin/billing/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminBillingProductsRoute = AdminBillingProductsRouteImport.update({
+  id: '/admin/billing/products',
+  path: '/admin/billing/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/integration': typeof IntegrationRoute
   '/login': typeof LoginRoute
   '/overview': typeof OverviewRoute
   '/register': typeof RegisterRoute
@@ -153,17 +171,20 @@ export interface FileRoutesByFullPath {
   '/applications/$id': typeof ApplicationsIdRoute
   '/proxy/playground': typeof ProxyPlaygroundRoute
   '/settings/alerts': typeof SettingsAlertsRoute
+  '/settings/billing': typeof SettingsBillingRoute
   '/settings/provider-keys': typeof SettingsProviderKeysRoute
   '/settings/webhooks': typeof SettingsWebhooksRoute
   '/admin/': typeof AdminIndexRoute
   '/analytics/': typeof AnalyticsIndexRoute
   '/applications/': typeof ApplicationsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/admin/billing/products': typeof AdminBillingProductsRoute
+  '/admin/billing/': typeof AdminBillingIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/integration': typeof IntegrationRoute
   '/login': typeof LoginRoute
   '/overview': typeof OverviewRoute
   '/register': typeof RegisterRoute
@@ -176,18 +197,21 @@ export interface FileRoutesByTo {
   '/applications/$id': typeof ApplicationsIdRoute
   '/proxy/playground': typeof ProxyPlaygroundRoute
   '/settings/alerts': typeof SettingsAlertsRoute
+  '/settings/billing': typeof SettingsBillingRoute
   '/settings/provider-keys': typeof SettingsProviderKeysRoute
   '/settings/webhooks': typeof SettingsWebhooksRoute
   '/admin': typeof AdminIndexRoute
   '/analytics': typeof AnalyticsIndexRoute
   '/applications': typeof ApplicationsIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/admin/billing/products': typeof AdminBillingProductsRoute
+  '/admin/billing': typeof AdminBillingIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/docs': typeof DocsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/integration': typeof IntegrationRoute
   '/login': typeof LoginRoute
   '/overview': typeof OverviewRoute
   '/register': typeof RegisterRoute
@@ -200,19 +224,22 @@ export interface FileRoutesById {
   '/applications/$id': typeof ApplicationsIdRoute
   '/proxy/playground': typeof ProxyPlaygroundRoute
   '/settings/alerts': typeof SettingsAlertsRoute
+  '/settings/billing': typeof SettingsBillingRoute
   '/settings/provider-keys': typeof SettingsProviderKeysRoute
   '/settings/webhooks': typeof SettingsWebhooksRoute
   '/admin/': typeof AdminIndexRoute
   '/analytics/': typeof AnalyticsIndexRoute
   '/applications/': typeof ApplicationsIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/admin/billing/products': typeof AdminBillingProductsRoute
+  '/admin/billing/': typeof AdminBillingIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/docs'
     | '/forgot-password'
+    | '/integration'
     | '/login'
     | '/overview'
     | '/register'
@@ -225,17 +252,20 @@ export interface FileRouteTypes {
     | '/applications/$id'
     | '/proxy/playground'
     | '/settings/alerts'
+    | '/settings/billing'
     | '/settings/provider-keys'
     | '/settings/webhooks'
     | '/admin/'
     | '/analytics/'
     | '/applications/'
     | '/settings/'
+    | '/admin/billing/products'
+    | '/admin/billing/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/docs'
     | '/forgot-password'
+    | '/integration'
     | '/login'
     | '/overview'
     | '/register'
@@ -248,17 +278,20 @@ export interface FileRouteTypes {
     | '/applications/$id'
     | '/proxy/playground'
     | '/settings/alerts'
+    | '/settings/billing'
     | '/settings/provider-keys'
     | '/settings/webhooks'
     | '/admin'
     | '/analytics'
     | '/applications'
     | '/settings'
+    | '/admin/billing/products'
+    | '/admin/billing'
   id:
     | '__root__'
     | '/'
-    | '/docs'
     | '/forgot-password'
+    | '/integration'
     | '/login'
     | '/overview'
     | '/register'
@@ -271,18 +304,21 @@ export interface FileRouteTypes {
     | '/applications/$id'
     | '/proxy/playground'
     | '/settings/alerts'
+    | '/settings/billing'
     | '/settings/provider-keys'
     | '/settings/webhooks'
     | '/admin/'
     | '/analytics/'
     | '/applications/'
     | '/settings/'
+    | '/admin/billing/products'
+    | '/admin/billing/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  DocsRoute: typeof DocsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  IntegrationRoute: typeof IntegrationRoute
   LoginRoute: typeof LoginRoute
   OverviewRoute: typeof OverviewRoute
   RegisterRoute: typeof RegisterRoute
@@ -295,12 +331,15 @@ export interface RootRouteChildren {
   ApplicationsIdRoute: typeof ApplicationsIdRoute
   ProxyPlaygroundRoute: typeof ProxyPlaygroundRoute
   SettingsAlertsRoute: typeof SettingsAlertsRoute
+  SettingsBillingRoute: typeof SettingsBillingRoute
   SettingsProviderKeysRoute: typeof SettingsProviderKeysRoute
   SettingsWebhooksRoute: typeof SettingsWebhooksRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AnalyticsIndexRoute: typeof AnalyticsIndexRoute
   ApplicationsIndexRoute: typeof ApplicationsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
+  AdminBillingProductsRoute: typeof AdminBillingProductsRoute
+  AdminBillingIndexRoute: typeof AdminBillingIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -340,18 +379,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/integration': {
+      id: '/integration'
+      path: '/integration'
+      fullPath: '/integration'
+      preLoaderRoute: typeof IntegrationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/forgot-password': {
       id: '/forgot-password'
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs': {
-      id: '/docs'
-      path: '/docs'
-      fullPath: '/docs'
-      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -403,6 +442,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsProviderKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/billing': {
+      id: '/settings/billing'
+      path: '/settings/billing'
+      fullPath: '/settings/billing'
+      preLoaderRoute: typeof SettingsBillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/alerts': {
       id: '/settings/alerts'
       path: '/settings/alerts'
@@ -452,13 +498,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAuditLogsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/billing/': {
+      id: '/admin/billing/'
+      path: '/admin/billing'
+      fullPath: '/admin/billing/'
+      preLoaderRoute: typeof AdminBillingIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/billing/products': {
+      id: '/admin/billing/products'
+      path: '/admin/billing/products'
+      fullPath: '/admin/billing/products'
+      preLoaderRoute: typeof AdminBillingProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  DocsRoute: DocsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  IntegrationRoute: IntegrationRoute,
   LoginRoute: LoginRoute,
   OverviewRoute: OverviewRoute,
   RegisterRoute: RegisterRoute,
@@ -471,12 +531,15 @@ const rootRouteChildren: RootRouteChildren = {
   ApplicationsIdRoute: ApplicationsIdRoute,
   ProxyPlaygroundRoute: ProxyPlaygroundRoute,
   SettingsAlertsRoute: SettingsAlertsRoute,
+  SettingsBillingRoute: SettingsBillingRoute,
   SettingsProviderKeysRoute: SettingsProviderKeysRoute,
   SettingsWebhooksRoute: SettingsWebhooksRoute,
   AdminIndexRoute: AdminIndexRoute,
   AnalyticsIndexRoute: AnalyticsIndexRoute,
   ApplicationsIndexRoute: ApplicationsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
+  AdminBillingProductsRoute: AdminBillingProductsRoute,
+  AdminBillingIndexRoute: AdminBillingIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

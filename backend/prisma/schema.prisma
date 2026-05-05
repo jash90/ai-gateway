@@ -61,7 +61,10 @@
 // =============================================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Railway's Nixpacks image is Debian-based; add Linux engine binary so the
+  // generated client can resolve query/migration engines at runtime.
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -120,6 +123,26 @@ enum EmailTokenPurpose {
   @@map("email_token_purpose")
 }
 
+enum BillingMode {
+  PACKAGE
+  SUBSCRIPTION
+
+  @@map("billing_mode")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  UNPAID
+  PAUSED
+
+  @@map("subscription_status")
+}
+
 // =============================================================================
 // Identity: Account + Refresh tokens
 // =============================================================================
@@ -134,6 +157,25 @@ model Account {
   name          String?
   role          AccountRole @default(USER)
   isActive      Boolean     @default(true) @map("is_active")
+
+  // ─────── Billing wallet (M1) ───────
+  // Account-level (SHARED) wallet — drawn from when no specific app has
+  // enough tokens, OR when user explicitly buys a "shared" package. Apps fall
+  // back to this wallet automatically.
+  tokenBalance     BigInt  @default(0) @map("token_balance")
+  // Stripe Customer id, lazily created on first checkout.
+  stripeCustomerId String? @unique @map("stripe_customer_id")
+  // Per-account toggle: when a provider call fails (4xx/5xx), should we refund
+  // the held tokens? `true` = no charge for failed calls (default).
+  refundOnError    Boolean @default(true) @map("refund_on_error")
+
+  // ─────── Wallet scoping defaults (per-application support) ───────
+  // When the user clicks "Buy package", which scope is selected by default?
+  // Values: "PER_APPLICATION" (tokens credited to the chosen app) or
+  // "SHARED_ACCOUNT" (tokens credited to Account.tokenBalance, all apps share).
+  defaultPackageScope      String @default("PER_APPLICATION") @map("default_package_scope")
+  defaultSubscriptionScope String @default("SHARED_ACCOUNT")  @map("default_subscription_scope")
+
   // Soft delete marker. When set:
   //   - JwtAuthGuard rejects the JWT (treats account as logged out)
   //   - Login is rejected with a generic "invalid credentials" error
@@ -141,17 +183,20 @@ model Account {
   //     so the original address can be reused for a fresh registration
   //   - All ApplicationKeys are auto-revoked (revokedAt = now)
   // Hard delete (anonymization) happens via the Phase 4 GDPR endpoint.
-  deletedAt     DateTime?   @map("deleted_at")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
-  refreshTokens  RefreshToken[]
-  emailTokens    EmailToken[]
-  applications   Application[]
-  providerKeys   UserProviderKey[]
-  usageEvents    UsageEvent[]
-  webhookConfigs WebhookConfig[]
-  alertRules     AlertRule[]
+  refreshTokens        RefreshToken[]
+  emailTokens          EmailToken[]
+  applications         Application[]
+  providerKeys         UserProviderKey[]
+  usageEvents          UsageEvent[]
+  webhookConfigs       WebhookConfig[]
+  alertRules           AlertRule[]
+  walletTransactions   WalletTransaction[]
+  featureFlagOverrides FeatureFlag[]
+  billingSubscriptions BillingSubscription[]
 
   @@index([deletedAt])
   @@map("accounts")
@@ -218,13 +263,20 @@ model Application {
   name        String
   description String?
   isActive    Boolean  @default(true) @map("is_active")
+
+  // Per-application token wallet. Gateway pre-check uses this first; falls
+  // back to Account.tokenBalance (shared) when the app wallet runs out.
+  tokenBalance BigInt @default(0) @map("token_balance")
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  account     Account          @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  keys        ApplicationKey[]
-  endUsers    EndUser[]
-  usageEvents UsageEvent[]
+  account              Account               @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  keys                 ApplicationKey[]
+  endUsers             EndUser[]
+  usageEvents          UsageEvent[]
+  walletTransactions   WalletTransaction[]
+  billingSubscriptions BillingSubscription[]
 
   @@index([accountId])
   @@map("applications")
@@ -288,14 +340,31 @@ model EndUser {
   applicationId String   @map("application_id")
   externalId    String   @map("external_id") // ID from customer's app, opaque
   metadata      Json?
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  // Cascade is fine here — EndUser rows are pure attribution metadata. If the
-  // Application is being hard-deleted (only possible when it has no UsageEvents
-  // due to Restrict on the usage relation), losing EndUser rows is irrelevant.
-  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  usageEvents UsageEvent[]
+  // ─────── B2B2C wallet ───────
+  // Per-end-user token balance. When the gateway receives a request with
+  // `x-rcn-end-user`, pre-check holds tokens from THIS wallet exclusively (no
+  // fallback to Application.tokenBalance — end-user pays for themselves).
+  //
+  // Without the header, the gateway uses Application.tokenBalance as before
+  // (covers the integrator's "internal traffic" use case).
+  tokenBalance     BigInt  @default(0) @map("token_balance")
+  // Stripe Customer for this end-user. Lazily created on first checkout.
+  // Each end-user gets their own Customer so receipts/tax records are clean.
+  stripeCustomerId String? @unique @map("stripe_customer_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Restrict: end-user now owns wallet + (potentially) subscription, so a
+  // hard-delete of the parent Application must be blocked until the operator
+  // explicitly drains/cancels first. Soft-delete of the EndUser itself is via
+  // a future `deletedAt` column (out of scope here — sub cancel + zero-out
+  // wallet covers the realistic case).
+  application          Application           @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  usageEvents          UsageEvent[]
+  walletTransactions   WalletTransaction[]
+  billingSubscriptions BillingSubscription[]
 
   @@unique([applicationId, externalId])
   @@map("end_users")
@@ -366,17 +435,21 @@ model UsageEvent {
 // =============================================================================
 
 model ModelPricing {
-  id          String       @id @default(uuid())
-  provider    ProviderType
-  model       String
+  id               String       @id @default(uuid())
+  provider         ProviderType
+  model            String
   // Cost type: INPUT_TOKEN, OUTPUT_TOKEN, CACHE_READ_TOKEN, CACHE_WRITE_TOKEN
-  costType    String       @map("cost_type")
-  costPerUnit Decimal      @map("cost_per_unit") @db.Decimal(20, 10)
-  unitSize    Int          @default(1000000) @map("unit_size") // per-million by default
-  currency    String       @default("USD")
-  validFrom   DateTime     @default(now()) @map("valid_from")
-  validUntil  DateTime?    @map("valid_until")
-  createdAt   DateTime     @default(now()) @map("created_at")
+  costType         String       @map("cost_type")
+  costPerUnit      Decimal      @map("cost_per_unit") @db.Decimal(20, 10)
+  unitSize         Int          @default(1000000) @map("unit_size") // per-million by default
+  currency         String       @default("USD")
+  // M2: multiplier applied to LLM tokens when computing wallet debit. Default
+  // 1.0 = parity (1 LLM token = 1 wallet token). Premium models (GPT-4o, opus)
+  // use higher values (e.g. 5.0) so they consume more wallet per request.
+  walletMultiplier Float        @default(1.0) @map("wallet_multiplier")
+  validFrom        DateTime     @default(now()) @map("valid_from")
+  validUntil       DateTime?    @map("valid_until")
+  createdAt        DateTime     @default(now()) @map("created_at")
 
   @@unique([provider, model, costType, validFrom])
   @@index([provider, model])
@@ -495,6 +568,200 @@ model AuditLog {
   @@index([action])
   // BRIN on created_at for retention sweeps — added via raw migration, see bottom.
   @@map("audit_logs")
+}
+
+// =============================================================================
+// Wallet (M1) — token billing ledger
+// =============================================================================
+//
+// `Account.tokenBalance` is the cached running balance (BigInt — LLM tokens).
+// `WalletTransaction` is the append-only ledger; the cached column is mutated
+// inside the same SQL `updateMany` that inserts the transaction row, keeping
+// them coherent without explicit DB transactions.
+//
+// Idempotency:
+//   - `requestId @unique` covers gateway hold/settle on worker retry.
+//   - `stripeEventId @unique` rejects duplicate Stripe webhook replays.
+
+enum WalletTxType {
+  HOLD // pre-flight estimate locked from balance
+  SETTLE // hold → actual usage delta committed (negative or positive)
+  REFUND // hold released (provider error or refundOnError=true)
+  TOPUP // Stripe Checkout completed (one-time package)
+  SUBSCRIPTION_GRANT // Stripe invoice.paid (rollover model adds tokens)
+  SUBSCRIPTION_RESET // Stripe invoice.paid (reset model sets tokens to plan)
+  ADJUST // admin manual grant or correction
+
+  @@map("wallet_tx_type")
+}
+
+model WalletTransaction {
+  id            String       @id @default(uuid())
+  accountId     String       @map("account_id")
+  // Wallet target hierarchy — at most ONE of these is set:
+  //   * endUserId set        → tx targets EndUser.tokenBalance
+  //   * applicationId set    → tx targets Application.tokenBalance
+  //   * both null            → tx targets Account.tokenBalance (shared)
+  applicationId String?      @map("application_id")
+  endUserId     String?      @map("end_user_id")
+  type          WalletTxType
+  // Signed amount in LLM tokens. Positive = credit, negative = debit.
+  amount        BigInt
+  // Cached balance after this transaction was applied (of the affected wallet).
+  balanceAfter  BigInt       @map("balance_after")
+  // Gateway request id this tx is tied to (HOLD/SETTLE/REFUND share one).
+  // For cross-wallet holds we suffix with `:account` / `:app` / `:enduser`.
+  requestId     String?      @unique @map("request_id")
+  // Stripe event id (for TOPUP/SUBSCRIPTION_*); ensures webhook idempotency.
+  stripeEventId String?      @unique @map("stripe_event_id")
+  metadata      Json?
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  endUser     EndUser?     @relation(fields: [endUserId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([applicationId, createdAt(sort: Desc)])
+  @@index([endUserId, createdAt(sort: Desc)])
+  @@map("wallet_transactions")
+}
+
+// =============================================================================
+// Feature flags (M1)
+// =============================================================================
+//
+// Resolution order (FeatureFlagService.isEnabled(key, accountId?)):
+//   1. Per-account override (scope=account, accountId=<uuid>)
+//   2. Global flag (scope=global, accountId=null)
+//   3. Env default (FEATURE_<KEY>=true|false)
+//   4. Hardcoded fallback (false unless service overrides)
+//
+// 60s in-memory cache, invalidated via Redis pub/sub on update.
+
+model FeatureFlag {
+  id        String   @id @default(uuid())
+  // Dotted key: `billing.enforced`, `billing.refundOnError`, etc.
+  key       String
+  // "global" or "account"
+  scope     String
+  // Set when scope=account; null for global.
+  accountId String?  @map("account_id")
+  enabled   Boolean  @default(false)
+  // Free-form payload (e.g. threshold values, A/B variant).
+  payload   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account Account? @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  // One row per (key, account). Global is (key, null).
+  @@unique([key, accountId])
+  @@index([key])
+  @@map("feature_flags")
+}
+
+// =============================================================================
+// Billing — Stripe wiring (M2)
+// =============================================================================
+//
+// Single-tenant operator model: one StripeConfig row, encrypted secret/webhook
+// signing keys (re-uses MASTER_ENCRYPTION_KEY from BYOK). Operator creates
+// products + prices through admin UI; we mirror Stripe ids in our DB.
+//
+// `id="singleton"` enforces 0..1 row via app-layer; we don't add a CHECK
+// constraint to keep migrations portable.
+
+model StripeConfig {
+  id                     String    @id @default("singleton")
+  publishableKey         String?   @map("publishable_key")
+  encryptedSecretKey     Bytes?    @map("encrypted_secret_key")
+  encryptedWebhookSecret Bytes?    @map("encrypted_webhook_secret")
+  encryptionKeyId        String?   @map("encryption_key_id")
+  // "test" or "live" — drives which Stripe API the runtime hits.
+  mode                   String    @default("test")
+  // Toggle: when false, /v1/billing/checkout returns 503 (operator hasn't
+  // finished setup yet). UI uses this for the "ready to accept payments?" badge.
+  isActive               Boolean   @default(false) @map("is_active")
+  // Last successful Stripe webhook event timestamp + id — for the admin UI
+  // status display ("✓ Last webhook received: 2 min ago").
+  lastWebhookAt          DateTime? @map("last_webhook_at")
+  lastWebhookEvent       String?   @map("last_webhook_event")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("stripe_config")
+}
+
+model BillingProduct {
+  id              String      @id @default(uuid())
+  stripeProductId String      @unique @map("stripe_product_id")
+  name            String
+  description     String?
+  mode            BillingMode
+  isActive        Boolean     @default(true) @map("is_active")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  prices BillingPrice[]
+
+  @@map("billing_products")
+}
+
+model BillingPrice {
+  id            String   @id @default(uuid())
+  productId     String   @map("product_id")
+  stripePriceId String   @unique @map("stripe_price_id")
+  // ISO 4217 (USD by default).
+  currency      String   @default("usd")
+  // Stripe charges in cents (USD), groszy (PLN), etc.
+  unitAmount    Int      @map("unit_amount")
+  // null = one-time, "month"/"year" = recurring.
+  interval      String?
+  // How many wallet (LLM) tokens this price grants on successful payment.
+  // For SUBSCRIPTION rows: per-period amount (added or reset depending on metadata).
+  tokensGranted BigInt   @map("tokens_granted")
+  isActive      Boolean  @default(true) @map("is_active")
+  // Free-form Stripe metadata mirror (e.g. tokensRolloverOnRenew, planTier).
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  product BillingProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, isActive])
+  @@map("billing_prices")
+}
+
+model BillingSubscription {
+  id                   String             @id @default(uuid())
+  accountId            String             @map("account_id")
+  // Scope: "SHARED_ACCOUNT" (credits Account.tokenBalance), "PER_APPLICATION"
+  // (credits Application.tokenBalance), or "PER_END_USER" (credits
+  // EndUser.tokenBalance — B2B2C). Picked at checkout time, immutable after.
+  scope                String             @default("SHARED_ACCOUNT")
+  // Set when scope=PER_APPLICATION or scope=PER_END_USER; null otherwise.
+  applicationId        String?            @map("application_id")
+  // Set only when scope=PER_END_USER.
+  endUserId            String?            @map("end_user_id")
+  stripeSubscriptionId String             @unique @map("stripe_subscription_id")
+  priceId              String             @map("price_id")
+  status               SubscriptionStatus
+  currentPeriodStart   DateTime           @map("current_period_start")
+  currentPeriodEnd     DateTime           @map("current_period_end")
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt           DateTime?          @map("canceled_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  endUser     EndUser?     @relation(fields: [endUserId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, status])
+  @@index([applicationId, status])
+  @@index([endUserId, status])
+  @@map("billing_subscriptions")
 }
 
 // =============================================================================

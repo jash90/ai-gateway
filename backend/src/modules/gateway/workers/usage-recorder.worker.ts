@@ -4,21 +4,18 @@ import type { Job } from 'bullmq'
 import { PrismaService } from '../../../prisma/prisma.service'
 import type { RecordUsageInput } from '../services/usage-recorder.service'
 import { CostCalculatorService } from '../services/cost-calculator.service'
+import { WalletService } from '../../wallet/wallet.service'
+import { FeatureFlagsService } from '../../feature-flags/feature-flags.service'
 
 export const USAGE_RECORDING_QUEUE = 'usage-recording'
 
 /**
  * BullMQ worker that consumes usage-recording jobs and INSERTs UsageEvent rows.
  *
- * Why a queue: gateway response latency shouldn't include Postgres write time.
- * Crash recovery: jobs persist in Redis until acknowledged, so a process
- * restart between gateway response and DB write doesn't lose usage data.
- *
- * Payload shape: same as `RecordUsageInput` from UsageRecorderService, with
- * Date fields serialized to ISO strings (BullMQ JSON-roundtrips payloads).
- *
- * Cost computation (Sprint 3): the worker will lookup ModelPricing here and
- * write costUsd at INSERT time, avoiding a second pass.
+ * M4: after persisting UsageEvent, settle the wallet hold for billing-enforced
+ * accounts. Settle uses (input + output) tokens, refunds the difference vs hold.
+ * On error responses, optionally refund the entire hold based on
+ * Account.refundOnError.
  */
 @Processor(USAGE_RECORDING_QUEUE)
 export class UsageRecorderWorker extends WorkerHost {
@@ -27,6 +24,8 @@ export class UsageRecorderWorker extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private costCalculator: CostCalculatorService,
+    private wallet: WalletService,
+    private featureFlags: FeatureFlagsService,
   ) {
     super()
   }
@@ -64,19 +63,98 @@ export class UsageRecorderWorker extends WorkerHost {
       })
     } catch (err) {
       // Throwing causes BullMQ to retry per the queue's retry policy.
-      // For now we let the default 3-retry-with-exponential-backoff apply.
       this.logger.error(
         `Failed to persist UsageEvent (job ${job.id}, attempt ${job.attemptsMade}): ` +
           (err instanceof Error ? err.message : String(err)),
       )
       throw err
     }
+
+    // M4: Settle / refund the wallet hold (only if a walletRequestId was set,
+    // meaning gateway pre-check happened with billing.enforced=true).
+    const meta = input.metadata as { walletRequestId?: string } | undefined | null
+    const walletRequestId = meta?.walletRequestId
+    if (walletRequestId) {
+      try {
+        await this.handleWalletSettlement(input, walletRequestId)
+      } catch (err) {
+        this.logger.error(
+          `Wallet settlement failed for requestId=${walletRequestId}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        )
+        // Don't rethrow — UsageEvent already persisted, wallet drift is recoverable
+        // by the daily reconciliation cron (M7).
+      }
+    }
+  }
+
+  private async handleWalletSettlement(
+    input: RecordUsageInput,
+    walletRequestId: string,
+  ): Promise<void> {
+    const isError = input.statusCode >= 400
+
+    // Resolve refundOnError: per-account flag wins, falls back to Account column.
+    let refundOnError = true
+    try {
+      const flag = await this.featureFlags.resolve('billing.refundOnError', input.accountId)
+      if (flag.source !== 'fallback') {
+        refundOnError = flag.enabled
+      } else {
+        const acct = await this.prisma.account.findUnique({
+          where: { id: input.accountId },
+          select: { refundOnError: true },
+        })
+        refundOnError = acct?.refundOnError ?? true
+      }
+    } catch {
+      // Defaults to refunding on error (user-friendly).
+    }
+
+    // Decide which wallet path applies — at hold time we suffixed the requestId
+    // with `:enduser` (end-user wallet), `:app` / `:account` (application
+    // wallet flow), so we look up whichever exists and route accordingly.
+    const endUserHold = await this.prisma.walletTransaction.findUnique({
+      where: { requestId: `${walletRequestId}:enduser` },
+      select: { id: true },
+    })
+    const isEndUserHold = !!endUserHold
+
+    if (isError && refundOnError) {
+      const meta = {
+        statusCode: input.statusCode,
+        errorCode: input.errorCode ?? 'unknown',
+        provider: input.provider,
+        model: input.model,
+      }
+      if (isEndUserHold) {
+        await this.wallet.refundForEndUser(walletRequestId, 'PROVIDER_ERROR', meta)
+      } else {
+        await this.wallet.refundForApplication(walletRequestId, 'PROVIDER_ERROR', meta)
+      }
+      return
+    }
+
+    // Settle against actual (input + output) usage.
+    const inputTokens = BigInt(input.usage?.inputTokens ?? 0)
+    const outputTokens = BigInt(input.usage?.outputTokens ?? 0)
+    const actualTokens = inputTokens + outputTokens
+    const settleMeta = {
+      provider: input.provider,
+      model: input.model,
+      statusCode: input.statusCode,
+      errorCharged: isError && !refundOnError,
+    }
+    if (isEndUserHold) {
+      await this.wallet.settleForEndUser(walletRequestId, actualTokens, settleMeta)
+    } else {
+      await this.wallet.settleForApplication(walletRequestId, actualTokens, settleMeta)
+    }
   }
 }
 
 // =============================================================================
 // Serialization — Dates / Buffers don't survive BullMQ's JSON roundtrip cleanly.
-// The recorder service serializes Dates to ISO strings before enqueuing.
 // =============================================================================
 
 export type SerializedRecordUsageInput = Omit<RecordUsageInput, 'metadata'> & {

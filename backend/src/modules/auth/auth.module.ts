@@ -8,6 +8,7 @@ import { TokenService } from './services/token.service'
 import { RefreshTokenService } from './services/refresh-token.service'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
 import { ApplicationKeyGuard } from './guards/application-key.guard'
+import { ClientAuthGuard } from './guards/client-auth.guard'
 import { AdminGuard } from '../../common/guards/admin.guard'
 import { AccountDeletionService } from './services/account-deletion.service'
 import { AuditModule } from '../audit/audit.module'
@@ -46,12 +47,14 @@ import { EmailsModule } from '../emails/emails.module'
     RefreshTokenService,
     JwtAuthGuard,
     ApplicationKeyGuard,
+    ClientAuthGuard,
     AdminGuard,
     AccountDeletionService,
   ],
   exports: [
     JwtAuthGuard,
     ApplicationKeyGuard,
+    ClientAuthGuard,
     AdminGuard,
     TokenService,
     PasswordService,

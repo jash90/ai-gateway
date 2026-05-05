@@ -1,13 +1,18 @@
 import { Injectable, BadRequestException } from '@nestjs/common'
+import { randomBytes } from 'node:crypto'
 import type { ProviderType, Account, Application, ApplicationKey } from '@prisma/client'
 import { ProviderRouterService } from './services/provider-router.service'
 import { ByokKeyResolverService } from './services/byok-key-resolver.service'
 import { UsageRecorderService } from './services/usage-recorder.service'
 import { EndUserResolverService } from './services/end-user-resolver.service'
+import { TokenEstimatorService } from './services/token-estimator.service'
+import { ProviderErrorMapper } from './services/provider-error-mapper.service'
 import { OpenAIProvider } from './providers/openai.provider'
 import { AnthropicProvider } from './providers/anthropic.provider'
 import { OpenRouterProvider } from './providers/openrouter.provider'
 import { WebhooksService } from '../webhooks/webhooks.service'
+import { WalletService, PaymentRequiredException } from '../wallet/wallet.service'
+import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
 import type { BaseProvider, ProviderResponse } from './providers/base-provider'
 import {
   openaiToAnthropicRequest,
@@ -84,6 +89,10 @@ export class GatewayService {
     private byokResolver: ByokKeyResolverService,
     private usageRecorder: UsageRecorderService,
     private endUserResolver: EndUserResolverService,
+    private tokenEstimator: TokenEstimatorService,
+    private providerErrorMapper: ProviderErrorMapper,
+    private wallet: WalletService,
+    private featureFlags: FeatureFlagsService,
     private openai: OpenAIProvider,
     private anthropic: AnthropicProvider,
     private openrouter: OpenRouterProvider,
@@ -93,6 +102,13 @@ export class GatewayService {
   async forward(ctx: GatewayContext): Promise<ForwardResult> {
     const reqT0 = Date.now()
     const { provider, model: routedModel } = this.router.route(ctx.rawModel, ctx.providerOverride)
+
+    // M3: stable wallet/usage id (used for hold/settle ledger correlation).
+    const requestId = `req_${randomBytes(12).toString('hex')}`
+    const billingEnforced = await this.featureFlags.isEnabled(
+      'billing.enforced',
+      ctx.account.id,
+    )
 
     // Detect cross-provider mismatch. If client called /v1/chat/completions
     // (OpenAI shape) but model routed to ANTHROPIC, we must translate the
@@ -122,7 +138,9 @@ export class GatewayService {
       model: routedModel,
     })
 
-    // Resolve EndUser (best-effort, may be null).
+    // Resolve EndUser (best-effort, may be null). We need this BEFORE the
+    // billing pre-check so we can route the hold to the end-user's wallet
+    // when the request carries x-rcn-end-user.
     const endUserId = await this.endUserResolver.resolve(
       ctx.application.id,
       ctx.endUserExternalId,
@@ -131,12 +149,99 @@ export class GatewayService {
     // Pick provider implementation.
     const impl = this.pickProvider(provider)
 
+    // ─────────── M3: Billing pre-check (token wallet hold) ───────────
+    // Hold AFTER BYOK resolution so we don't lock tokens for requests that
+    // never reach the provider (missing key, routing failure).
+    //
+    // Wallet selection:
+    //   * x-rcn-end-user present + EndUser resolved → end-user wallet (B2B2C).
+    //     STRICT: no fallback to app/account. End-user pays for themselves.
+    //   * otherwise → application wallet first, then shared account fallback.
+    if (billingEnforced) {
+      const estimate = this.tokenEstimator.estimate(provider, ctx.body)
+      if (endUserId) {
+        await this.wallet.holdForEndUser(
+          ctx.account.id,
+          ctx.application.id,
+          endUserId,
+          requestId,
+          BigInt(estimate.totalTokens),
+          {
+            provider,
+            model: routedModel,
+            inputTokens: estimate.inputTokens,
+            maxOutputTokens: estimate.maxOutputTokens,
+          },
+        )
+      } else {
+        await this.wallet.holdForApplication(
+          ctx.account.id,
+          ctx.application.id,
+          requestId,
+          BigInt(estimate.totalTokens),
+          {
+            provider,
+            model: routedModel,
+            inputTokens: estimate.inputTokens,
+            maxOutputTokens: estimate.maxOutputTokens,
+          },
+        )
+      }
+    }
+    // ─────────── /M3 ───────────
+
     // Forward.
-    const rawResponse = await impl.proxy({
-      apiKey,
-      isStream: ctx.isStream,
-      body: upstreamBody,
-    })
+    let rawResponse: ProviderResponse
+    try {
+      rawResponse = await impl.proxy({
+        apiKey,
+        isStream: ctx.isStream,
+        body: upstreamBody,
+      })
+    } catch (err) {
+      // If provider call itself throws (network error, timeout) — refund the
+      // hold from whichever wallet held the tokens.
+      if (billingEnforced) {
+        const refundMeta = {
+          provider,
+          model: routedModel,
+          error: err instanceof Error ? err.message : 'unknown',
+        }
+        if (endUserId) {
+          await this.wallet.refundForEndUser(requestId, 'PROVIDER_CALL_FAILED', refundMeta)
+        } else {
+          await this.wallet.refundForApplication(requestId, 'PROVIDER_CALL_FAILED', refundMeta)
+        }
+      }
+      throw err
+    }
+
+    // ─────────── M3: Provider out-of-funds detection ───────────
+    // If upstream signals "no credits at provider" — refund the hold and
+    // surface a 402 with errorCode=PROVIDER_INSUFFICIENT_FUNDS.
+    if (billingEnforced && rawResponse.statusCode >= 400) {
+      const upstreamFundsErr = this.providerErrorMapper.mapInsufficientFunds(
+        provider,
+        rawResponse.statusCode,
+        // body may be ReadableStream for streaming requests; only inspect JSON.
+        typeof rawResponse.body === 'object' && !(rawResponse.body instanceof ReadableStream)
+          ? rawResponse.body
+          : null,
+      )
+      if (upstreamFundsErr) {
+        const refundMeta = { provider, model: routedModel }
+        if (endUserId) {
+          await this.wallet.refundForEndUser(requestId, 'PROVIDER_INSUFFICIENT_FUNDS', refundMeta)
+        } else {
+          await this.wallet.refundForApplication(requestId, 'PROVIDER_INSUFFICIENT_FUNDS', refundMeta)
+        }
+        throw new PaymentRequiredException({
+          message: 'Provider rejected the call due to insufficient credits at the upstream.',
+          code: 'PROVIDER_INSUFFICIENT_FUNDS',
+        })
+      }
+    }
+    // ─────────── /M3 ───────────
 
     let response: ProviderResponse = rawResponse
     let streamFinalize: ForwardResult['streamFinalize']
@@ -182,6 +287,7 @@ export class GatewayService {
           ttftMs: firstChunkAt !== null ? firstChunkAt - reqT0 : null,
           latencyMs: Date.now() - reqT0,
           usage: finalUsage,
+          metadata: billingEnforced ? { walletRequestId: requestId } : undefined,
         })
         // Webhook dispatch on stream completion. Errors are best-effort.
         void this.webhooks.dispatch({
@@ -229,6 +335,7 @@ export class GatewayService {
         ttftMs: response.ttftMs,
         latencyMs: response.latencyMs,
         usage: response.usage,
+        metadata: billingEnforced ? { walletRequestId: requestId } : undefined,
       })
 
       // Webhook dispatch — split success/error events.
