@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/v1/:path*",
+      "destination": "https://backend-production-28b8.up.railway.app/v1/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "https://backend-production-28b8.up.railway.app/health"
+    },
+    {
+      "source": "/docs",
+      "destination": "https://backend-production-28b8.up.railway.app/docs"
+    },
+    {
+      "source": "/docs-json",
+      "destination": "https://backend-production-28b8.up.railway.app/docs-json"
+    },
+    {
+      "source": "/((?!assets|favicon|_vercel).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

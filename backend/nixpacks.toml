@@ -1,0 +1,11 @@
+# Force Node 22 — Nixpacks default heuristic picked nodejs_18 which is EOL
+# and no longer available in nixpkgs (build error).
+# Bun is still our package manager via bun.lock; Node 22 is here so the runtime
+# can `node dist/main` and so Prisma engines find a compatible libc.
+
+[phases.setup]
+nixPkgs = ["nodejs_22", "bun", "openssl", "gcc"]
+# argon2 native binding needs libstdc++.so.6. Bun resolves shared libs via Nix
+# store, so apt-installed libstdc++6 isn't enough — `gcc` brings the matching
+# Nix-store libstdc++.so.6 onto LD_LIBRARY_PATH.
+aptPkgs = ["libstdc++6"]
